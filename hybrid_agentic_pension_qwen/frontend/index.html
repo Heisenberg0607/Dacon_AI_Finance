@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>깨움 KKAEUM</title>
+  <link rel="stylesheet" href="/static/styles.css?v=18" />
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+
+  <header class="site-header">
+    <div>
+      <h1>깨움 <span class="brand-en">KKAEUM</span></h1>
+      <p class="sub">당신의 AI 연금분석 비서</p>
+    </div>
+  </header>
+
+  <main class="page">
+    <section id="inputView" class="stage-view">
+      <div class="hero-copy">
+        <p class="step-label">1단계 · 사용자 정보 분석</p>
+        <h2>정보를 입력하면 깨움이<br />퇴직 연금 분석을 수행합니다.</h2>
+        <p class="hero-pipeline">
+          <span>사용자 분석 → 금융지식 검색 → 금융 계산 → 몬테카를로 시뮬레이션</span>
+          <br />
+          <span class="pipeline-continuation">→ 포트폴리오 최적화 → 맞춤 전략 생성 → 전략 검증 → 보고서 생성</span>
+        </p>
+      </div>
+
+      <form id="pensionForm" class="form-card">
+        <div class="form-section-title">
+          <span>사용자 기본 정보</span>
+          <small>금액단위: 만원(KRW)</small>
+        </div>
+
+        <div class="form-grid common-fields">
+          <label class="field">
+            <span>현재 나이</span>
+            <div class="unit-input age-unit"><input id="age" type="number" min="18" max="70" value="32" required /><em>세</em></div>
+          </label>
+
+          <label class="field">
+            <span>은퇴 나이</span>
+            <div class="unit-input age-unit"><input id="retirementAge" type="number" min="40" max="85" value="60" required /><em>세</em></div>
+          </label>
+
+          <label class="field">
+            <span>현재 연소득</span>
+            <div class="money-input"><input id="annualIncome" type="number" min="1" value="5000" required /><em>만원</em></div>
+          </label>
+
+          <label class="field">
+            <span>은퇴 후 희망 월 소득</span>
+            <div class="money-input"><input id="desiredMonthlyIncome" type="number" min="1" value="250" required /><em>만원</em></div>
+          </label>
+        </div>
+
+        <div class="operation-block">
+          <span class="operation-label">운영 유형</span>
+          <input id="operationType" type="hidden" value="DC" />
+          <div class="operation-buttons" role="group" aria-label="운영 유형 선택">
+            <button class="operation-btn" type="button" data-operation="DB">DB</button>
+            <button class="operation-btn active" type="button" data-operation="DC">DC</button>
+            <button class="operation-btn" type="button" data-operation="IRP">IRP</button>
+          </div>
+        </div>
+
+        <div id="dbFields" class="conditional-section is-hidden">
+          <div class="conditional-title">
+            <div><b>DB형 분석 정보</b><small>임금과 근속기간을 바탕으로 예상 퇴직급여를 분석합니다.</small></div>
+            <span class="type-chip">DB</span>
+          </div>
+          <div class="form-grid">
+            <label class="field">
+              <span>현재 근속연수</span>
+              <div class="unit-input"><input id="currentTenureYears" type="number" min="0" max="50" step="0.5" value="3" /><em>년</em></div>
+            </label>
+
+            <label class="field">
+              <span>예상 추가 근속연수</span>
+              <div class="derived-value"><strong id="additionalTenureDisplay">28년</strong><small>현재 나이와 은퇴 나이로 자동 계산</small></div>
+            </label>
+
+            <label class="field">
+              <span>업종 / 직군 <small class="optional-tag">(선택사항)</small></span>
+              <input id="industryJob" type="text" maxlength="120" placeholder="예: 금융 / 데이터 분석" />
+            </label>
+
+            <label class="field">
+              <span>회사 규모 <small class="optional-tag">(선택사항)</small></span>
+              <select id="companySize">
+                <option value="">선택 안 함</option>
+                <option value="대기업">대기업</option>
+                <option value="중견기업">중견기업</option>
+                <option value="중소기업">중소기업</option>
+                <option value="공공/기타">공공/기타</option>
+              </select>
+            </label>
+
+            <div class="field salary-history-field">
+              <span>최근 연봉 이력 <small class="optional-tag">(선택사항)</small></span>
+              <div class="salary-history-grid">
+                <div class="money-input"><input id="salary3YearsAgo" type="number" min="1" placeholder="3년 전" /><em>만원</em></div>
+                <div class="money-input"><input id="salary2YearsAgo" type="number" min="1" placeholder="2년 전" /><em>만원</em></div>
+                <div class="money-input"><input id="salary1YearAgo" type="number" min="1" placeholder="1년 전" /><em>만원</em></div>
+              </div>
+              <small class="field-hint">입력값이 없으면 시장 benchmark 기반으로 임금상승률을 추정합니다.</small>
+            </div>
+
+            <label class="field wage-growth-field">
+              <span>예상 임금상승률 <small class="optional-tag">(선택사항)</small></span>
+              <div class="inline-control">
+                <div class="unit-input grow"><input id="wageGrowthRate" type="number" min="-5" max="20" step="0.1" placeholder="직접 입력 또는 자동 추정" /><em>%</em></div>
+                <button id="estimateWageBtn" class="estimate-btn" type="button">깨움이 추정</button>
+              </div>
+              <small id="wageGrowthHint" class="field-hint">비워두면 직군·회사규모·연봉 이력을 이용해 자동 추정합니다.</small>
+            </label>
+
+          </div>
+        </div>
+
+        <div id="dcIrpFields" class="conditional-section">
+          <div class="conditional-title">
+            <div><b>DC / IRP 분석 정보</b><small>적립금·납입액·가입 상품을 바탕으로 운용 전략을 분석합니다.</small></div>
+            <span id="dcIrpTypeChip" class="type-chip">DC</span>
+          </div>
+          <div class="form-grid">
+            <label class="field">
+              <span>현재 적립금</span>
+              <div class="money-input"><input id="currentSavings" type="number" min="0" value="3500" required /><em>만원</em></div>
+            </label>
+
+            <label class="field">
+              <span>연간 납입액</span>
+              <div class="money-input"><input id="annualContribution" type="number" min="0" value="360" required /><em>만원</em></div>
+            </label>
+
+            <label class="field">
+              <span>가입 사업자</span>
+              <select id="provider" required><option value="">불러오는 중...</option></select>
+            </label>
+
+            <label class="field" id="productNameField">
+              <span>가입 상품명</span>
+              <select id="productName" required><option value="">사업자를 먼저 선택하세요</option></select>
+            </label>
+
+            <label class="field" id="investmentTypeField">
+              <span>투자 유형</span>
+              <select id="investmentType" required>
+                <option value="안정형">안정형</option>
+                <option value="안정투자형">안정투자형</option>
+                <option value="중립투자형" selected>중립투자형</option>
+                <option value="적극투자형">적극투자형</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-note">
+          <b>계산 가정</b>
+          <span>희망 월소득은 4% 인출률을 이용해 목표 은퇴자산으로 환산합니다. 수익률·변동성은 프로토타입 가정치이며 보고서에 명시됩니다.</span>
+        </div>
+
+        <button id="submitBtn" class="primary-btn" type="submit">
+          <span>깨움 분석 시작</span><b>→</b>
+        </button>
+      </form>
+    </section>
+
+    <section id="workflowView" class="stage-view hidden">
+      <div class="section-head">
+        <div>
+          <p class="step-label">2단계 · AI 에이전트 분석</p>
+          <h2>하이브리드 에이전틱 AI 분석</h2>
+          <p id="workflowSubtitle">깨움 AI 에이전트가 필요한 분석 도구를 선택하고 있습니다.</p>
+        </div>
+        <span id="modeBadge" class="mode-badge">분석 준비</span>
+      </div>
+
+      <div class="workflow-layout">
+        <div class="agent-core-card">
+          <div class="agent-orb"><span>AI</span></div>
+          <p>깨움 AI 에이전트</p>
+          <strong id="agentState">상황 분석 / 작업 계획</strong>
+          <small id="agentDetail">사용자 입력을 구조화합니다.</small>
+        </div>
+
+        <div class="pipeline" id="pipeline">
+          <article class="pipeline-node" data-stage="profile">
+            <span class="node-code">PF</span><div><b>사용자 프로필 분석</b><small>투자기간 · 위험수용능력</small></div><em>대기</em>
+          </article>
+          <article class="pipeline-node" data-stage="rag">
+            <span class="node-code">RG</span><div><b>금융지식 검색</b><small>선택 상품 PDF 내부 근거 검색</small></div><em>대기</em>
+          </article>
+          <article class="pipeline-node wide" data-stage="product_extraction">
+            <span class="node-code">PX</span><div><b>상품정보 구조화 추출</b><small>선택한 공식 PDF에서 구성상품 · 비중 · 위험정보를 Qwen이 구조화</small></div><em>대기</em>
+          </article>
+          <article class="pipeline-node" data-stage="finance">
+            <span class="node-code">FN</span><div><b>금융 계산 엔진</b><small>목표자산 · 예상자산 · Gap</small></div><em>대기</em>
+          </article>
+          <article class="pipeline-node" data-stage="monte_carlo">
+            <span class="node-code">MC</span><div><b>몬테카를로 시뮬레이션</b><small>목표달성 확률 분포</small></div><em>대기</em>
+          </article>
+          <article class="pipeline-node" data-stage="optimizer">
+            <span class="node-code">OP</span><div><b>포트폴리오 최적화</b><small>제약 내 후보 전략 탐색</small></div><em>대기</em>
+          </article>
+          <article class="pipeline-node wide" data-stage="recommendation">
+            <span class="node-code">RA</span><div><b>맞춤 전략 생성</b><small>RAG + 계산결과를 결합한 개인화 전략</small></div><em>대기</em>
+          </article>
+          <article class="pipeline-node wide" data-stage="critic">
+            <span class="node-code">CR</span><div><b>전략 검증 에이전트</b><small>적합성 · 근거 · 숫자 · 운영유형 검증</small></div><em>대기</em>
+          </article>
+          <article class="pipeline-node wide report-node" data-stage="report">
+            <span class="node-code">RP</span><div><b>보고서 생성</b><small>검증된 결과만 최종 보고서 반영</small></div><em>대기</em>
+          </article>
+        </div>
+      </div>
+
+      <div class="terminal-card">
+        <div class="terminal-head"><span></span><span></span><span></span><b>에이전트 실행 기록</b></div>
+        <div id="traceLog" class="terminal-body"><p><i>시스템</i> 분석 흐름을 초기화했습니다.</p></div>
+      </div>
+    </section>
+
+    <section id="reportView" class="stage-view hidden">
+      <div class="report-toolbar no-print">
+        <div>
+          <p class="step-label">3단계 · AI 분석 보고서</p>
+          <h2 id="reportTitleTop">AI 퇴직연금 건강검진 보고서</h2>
+        </div>
+        <div class="toolbar-actions">
+          <button id="restartBtn" class="secondary-btn" type="button">다시 입력</button>
+          <button id="printBtn" class="primary-btn compact" type="button">PDF로 저장 / 인쇄</button>
+        </div>
+      </div>
+
+      <div class="report-sheet">
+        <div class="report-cover">
+          <div>
+            <p class="kicker">깨움 AI 퇴직연금 분석 보고서</p>
+            <h2 id="reportTitle">AI 퇴직연금 건강검진 보고서</h2>
+            <p id="reportMeta">-</p>
+          </div>
+          <div class="score-ring">
+            <span>목표 달성률</span>
+            <strong id="goalRate">-</strong>
+          </div>
+        </div>
+
+        <div class="metric-grid">
+          <article><span id="mCurrentLabel">현재 적립금</span><strong id="mCurrent">-</strong><small id="mCurrentSmall">입력값</small></article>
+          <article><span id="mFutureLabel">예상 은퇴자산</span><strong id="mFuture">-</strong><small id="mFutureSmall">현재 투자유형 가정</small></article>
+          <article><span id="mTargetLabel">목표 은퇴자산</span><strong id="mTarget">-</strong><small id="mTargetSmall">희망소득 / 4%</small></article>
+          <article><span id="mProbabilityLabel">목표달성 확률</span><strong id="mProbability">-</strong><small id="mProbabilitySmall">몬테카를로 시뮬레이션</small></article>
+        </div>
+
+        <section class="report-section">
+          <div class="report-section-title"><span>01</span><h3>종합 요약</h3></div>
+          <p id="executiveSummary" class="lead-text"></p>
+        </section>
+
+        <section class="report-section two-col">
+          <div>
+            <div class="report-section-title"><span>02</span><h3>AI 사용자 진단</h3></div>
+            <div id="profileFacts" class="fact-list"></div>
+          </div>
+          <div class="mini-panel">
+            <p class="mini-kicker">현재 분석 대상</p>
+            <h4 id="currentProduct">-</h4>
+            <p id="productAnalysis"></p>
+          </div>
+        </section>
+
+        <section class="report-section">
+          <div class="report-section-title"><span>03</span><h3>은퇴자산 전망 및 시뮬레이션</h3></div>
+          <div class="chart-box"><svg id="projectionChart" viewBox="0 0 980 360" aria-label="자산 성장 시뮬레이션"></svg></div>
+          <p id="simulationComment" class="caption"></p>
+        </section>
+
+        <section class="report-section two-col">
+          <div>
+            <div class="report-section-title"><span>04</span><h3>AI 맞춤 전략</h3></div>
+            <div id="strategyList" class="action-list"></div>
+          </div>
+          <div class="allocation-card">
+            <p class="mini-kicker">최적화 자산배분</p>
+            <div id="allocationBars"></div>
+            <div class="allocation-foot"><span>예상 목표달성률</span><strong id="optimizedGoal">-</strong></div>
+          </div>
+        </section>
+
+        <section class="report-section">
+          <div class="report-section-title"><span>05</span><h3>금융지식 근거</h3><b id="ragModeLabel" class="evidence-mode">-</b></div>
+          <div id="evidenceGrid" class="evidence-grid"></div>
+        </section>
+
+        <section class="report-section critic-section">
+          <div class="report-section-title"><span>06</span><h3>AI 전략 검증</h3><b id="criticStatus" class="critic-pass">-</b></div>
+          <div id="criticChecks" class="check-grid"></div>
+        </section>
+
+        <section class="report-section risk-section">
+          <div class="report-section-title"><span>07</span><h3>위험요인 및 계산 가정</h3></div>
+          <div id="riskNotes" class="risk-list"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <footer>깨움 KKAEUM · 당신의 AI 연금분석 비서</footer>
+  <script src="/static/app.js?v=18"></script>
+</body>
+</html>
