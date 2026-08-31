@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.agents import HybridAgenticWorkflow
-from backend.models import UserPensionInput
+from backend.chat_agent import ReportChatAgent
+from backend.models import ChatRequest, UserPensionInput
 from backend.qwen_client import QwenGateway
 from backend.rag import PensionRAG
 from backend.config import ROOT
+from backend.session_store import AnalysisStore
 from backend.tools import estimate_wage_growth
 
 FRONTEND = ROOT / 'frontend'
@@ -16,8 +18,10 @@ FRONTEND = ROOT / 'frontend'
 qwen = QwenGateway()
 rag = PensionRAG(qwen)
 workflow = HybridAgenticWorkflow(qwen, rag)
+chat_agent = ReportChatAgent(qwen, rag)
+analysis_store = AnalysisStore()
 
-app = FastAPI(title='깨움 KKAEUM - Hybrid Agentic AI Workflow', version='1.5.0')
+app = FastAPI(title='깨움 KKAEUM - Hybrid Agentic AI Workflow', version='1.9.0')
 app.mount('/static', StaticFiles(directory=FRONTEND), name='static')
 
 
@@ -60,4 +64,20 @@ def product_extraction(user: UserPensionInput):
 
 @app.post('/api/analyze')
 def analyze(user: UserPensionInput):
-    return workflow.run(user)
+    result = workflow.run(user)
+    # 보고서 화면 챗봇이 같은 분석 context를 이어서 쓰도록 서버에 잠시 보관한다.
+    result['analysis_id'] = analysis_store.put(user, result)
+    return result
+
+
+@app.post('/api/chat')
+def chat(request: ChatRequest):
+    """보고서 화면의 Report Q&A Agent.
+
+    분석 결과 전체는 서버 세션에 있으므로 요청에는 analysis_id와 질문만 담긴다.
+    """
+    session = analysis_store.get(request.analysis_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail='분석 결과가 만료되었습니다. 다시 분석해주세요.')
+    history = [turn.model_dump() for turn in request.history]
+    return chat_agent.answer(session, request.message, history)

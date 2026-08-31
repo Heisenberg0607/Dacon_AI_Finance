@@ -1,6 +1,8 @@
 const $ = (id) => document.getElementById(id);
 let catalog = {providers: [], products: []};
 let lastResult = null;
+let analysisId = null;
+let chatHistory = [];
 
 // v10: numeric inputs stay directly editable, but native stepper/wheel/arrow increment behavior is disabled.
 document.querySelectorAll('input[type="number"]').forEach(input => {
@@ -298,7 +300,7 @@ $('pensionForm').addEventListener('submit', async(e)=>{
   try{
     const res=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
     if(!res.ok){ throw new Error(await res.text()); }
-    const result=await res.json(); lastResult=result; stopPendingAnimation(); await replayTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
+    const result=await res.json(); lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(); await replayTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
   }catch(err){ stopPendingAnimation(); log('ERR',err.message); alert('분석 중 오류가 발생했습니다. .env의 Qwen 설정 또는 서버 로그를 확인해주세요.'); $('inputView').classList.remove('hidden'); $('workflowView').classList.add('hidden'); }
   finally{ btn.disabled=false; btn.querySelector('span').textContent='깨움 분석 시작'; }
 });
@@ -409,6 +411,7 @@ function renderReport(r){
   $('criticChecks').innerHTML=checks.map(x=>`<div>${esc(x)}</div>`).join('');
   $('riskNotes').innerHTML=(rep.risk_notes||[]).filter(Boolean).map(x=>`<div>${esc(x)}</div>`).join('');
   drawChart(f.series,o.series,f.target_retirement_asset);
+  setupChat(r);
 }
 function renderAllocation(allocation){ $('allocationBars').innerHTML=Object.entries(allocation||{}).map(([k,v])=>`<div class="allocation-row"><span>${esc(k)}</span><div class="allocation-track"><div class="allocation-fill" style="width:${Math.max(0,Math.min(100,Number(v)))}%"></div></div><strong>${fmtPct(v,1)}</strong></div>`).join(''); }
 function drawChart(current, optimized, target){
@@ -418,6 +421,163 @@ function drawChart(current, optimized, target){
   html+=`<polyline points="${pts(current)}" fill="none" stroke="#55d7e7" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="${pts(optimized)}" fill="none" stroke="#55efaa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
   [0,Math.round(last/2),last].forEach(t=>html+=`<text x="${x(t)}" y="${H-13}" text-anchor="middle" fill="#8ea49a" font-size="10">${t}년</text>`); svg.innerHTML=html;
 }
-$('restartBtn').addEventListener('click',()=>{ $('reportView').classList.add('hidden'); $('inputView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'}); });
+$('restartBtn').addEventListener('click',()=>{ resetChat(); $('reportView').classList.add('hidden'); $('inputView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'}); });
 $('printBtn').addEventListener('click',()=>window.print());
 init();
+
+/* ---- Report Q&A Agent: 보고서 화면 플로팅 챗봇 ---- */
+const SUGGESTIONS = {
+  DB: ['목표달성률이 왜 이 수준인가요?', '임금상승률이 1.5%면 어떻게 되나요?', '예상 퇴직급여 계산 근거는?'],
+  DCIRP: ['목표달성률이 낮은 이유는?', '납입액을 1200만원으로 늘리면?', '제 상품 구성은 어떻게 되나요?'],
+};
+
+function chatEl(tag, cls, text){
+  const el=document.createElement(tag);
+  if(cls) el.className=cls;
+  if(text!=null) el.textContent=text;
+  return el;
+}
+function chatScroll(){ const box=$('chatMessages'); box.scrollTop=box.scrollHeight; }
+function chatAppend(node){ $('chatMessages').appendChild(node); chatScroll(); return node; }
+
+function setupChat(r){
+  const isDB=r.user.operation_type==='DB';
+  chatHistory=[];
+  $('chatMessages').innerHTML='';
+  $('chatInput').disabled=false;
+  $('chatSendBtn').disabled=false;
+  $('chatScopeBadge').textContent = isDB ? '보고서 계산값 + 전체 상품 DB 기준' : '내 상품 PDF + 전체 상품 DB 기준';
+  chatAppend(chatEl('div','chat-msg bot',
+    isDB
+      ? '분석이 끝났습니다. 보고서의 계산값과 상품 DB를 근거로 답변드립니다. 임금상승률이나 은퇴 나이를 바꾼 경우도 다시 계산해 드립니다.'
+      : '분석이 끝났습니다. 보고서의 계산값과 가입 상품 PDF를 근거로 답변드립니다. 납입액, 자산배분, 은퇴 나이를 바꾼 경우도 다시 계산해 드립니다.'));
+  const list=$('chatSuggestions');
+  list.innerHTML='';
+  (isDB?SUGGESTIONS.DB:SUGGESTIONS.DCIRP).forEach(q=>{
+    const b=chatEl('button','chat-suggestion',q);
+    b.type='button';
+    b.addEventListener('click',()=>{ $('chatInput').value=q; sendChat(); });
+    list.appendChild(b);
+  });
+  $('chatDock').classList.remove('hidden');
+}
+
+function resetChat(){
+  analysisId=null;
+  chatHistory=[];
+  $('chatDock').classList.add('hidden');
+  $('chatPanel').classList.add('hidden');
+  $('chatFab').setAttribute('aria-expanded','false');
+  $('chatMessages').innerHTML='';
+  $('chatSuggestions').innerHTML='';
+  $('chatInput').value='';
+}
+
+function toggleChat(open){
+  $('chatPanel').classList.toggle('hidden',!open);
+  $('chatFab').classList.toggle('hidden',open);
+  $('chatFab').setAttribute('aria-expanded',open?'true':'false');
+  if(open){ $('chatInput').focus(); chatScroll(); }
+}
+$('chatFab').addEventListener('click',()=>toggleChat(true));
+$('chatCloseBtn').addEventListener('click',()=>toggleChat(false));
+
+function renderWhatIf(w){
+  if(!w || !w.applicable) return;
+  const card=chatEl('div','whatif-card');
+  card.appendChild(chatEl('h5',null,'재계산 시나리오'));
+
+  const labels={retirement_age:'은퇴 나이', annual_contribution:'연간 납입액', safe_ratio_pct:'안전자산 비중', wage_growth_rate_pct:'임금상승률'};
+  const units={retirement_age:'세', safe_ratio_pct:'%', wage_growth_rate_pct:'%'};
+  const changed=Object.entries(w.changes||{}).map(([k,v])=>`${labels[k]||k} ${v}${units[k]||''}`).join(' · ');
+  const notes=(w.notes||[]).join(' ');
+  card.appendChild(chatEl('p','whatif-changes',[changed,notes].filter(Boolean).join(' — ')));
+
+  const head=chatEl('div','whatif-row');
+  head.appendChild(chatEl('span','whatif-head','항목'));
+  head.appendChild(chatEl('b','whatif-head','현재'));
+  head.appendChild(chatEl('strong','whatif-head','시나리오'));
+  card.appendChild(head);
+
+  const rows=[
+    ['예상 자산', w.baseline.future_asset, w.scenario.future_asset],
+    ['목표달성률', `${w.baseline.goal_rate_pct}%`, `${w.scenario.goal_rate_pct}%`],
+    ['목표달성확률', `${w.baseline.success_probability_pct}%`, `${w.scenario.success_probability_pct}%`],
+  ];
+  rows.forEach(([label,base,scen])=>{
+    const row=chatEl('div','whatif-row');
+    row.appendChild(chatEl('span',null,label));
+    row.appendChild(chatEl('b',null,String(base)));
+    row.appendChild(chatEl('strong',null,String(scen)));
+    card.appendChild(row);
+  });
+  card.appendChild(chatEl('p','whatif-note',w.note||''));
+  chatAppend(card);
+}
+
+function renderEvidence(rows){
+  if(!rows || !rows.length) return;
+  const wrap=chatEl('div','chat-evidence');
+  rows.forEach(e=>{
+    const own=e.is_selected_product;
+    const chip=chatEl('button',`chat-chip${own?'':' foreign'}`,
+      `${e.evidence_id} · ${own?'내 상품':'타 상품'} · ${e.title||''} p.${e.page}`);
+    chip.type='button';
+    let opened=null;
+    chip.addEventListener('click',()=>{
+      if(opened){ opened.remove(); opened=null; return; }
+      opened=chatEl('div','chat-snippet',`[${e.evidence_id}] ${e.title||''} (${e.provider||''}) p.${e.page}\n\n${e.snippet||''}`);
+      wrap.insertAdjacentElement('afterend',opened);
+      chatScroll();
+    });
+    wrap.appendChild(chip);
+  });
+  chatAppend(wrap);
+}
+
+let chatBusy=false;
+async function sendChat(){
+  if(chatBusy) return;
+  const input=$('chatInput');
+  const text=(input.value||'').trim();
+  if(!text) return;
+  if(!analysisId){
+    chatAppend(chatEl('div','chat-msg bot error','분석 결과를 찾을 수 없습니다. 다시 입력을 눌러 분석을 새로 실행해주세요.'));
+    return;
+  }
+  chatBusy=true;
+  input.value='';
+  $('chatSendBtn').disabled=true;
+  chatAppend(chatEl('div','chat-msg user',text));
+  const typing=chatAppend((()=>{const t=chatEl('div','chat-typing'); t.innerHTML='<i></i><i></i><i></i>'; return t;})());
+
+  try{
+    const res=await fetch('/api/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({analysis_id:analysisId, message:text, history:chatHistory.slice(-6)}),
+    });
+    typing.remove();
+    if(res.status===404){
+      analysisId=null;
+      input.disabled=true;
+      chatAppend(chatEl('div','chat-msg bot error','분석 결과가 만료되었습니다. 다시 입력을 눌러 분석을 새로 실행해주세요.'));
+      return;
+    }
+    if(!res.ok) throw new Error(await res.text());
+    const data=await res.json();
+    chatAppend(chatEl('div','chat-msg bot',data.answer||'답변을 생성하지 못했습니다.'));
+    renderWhatIf(data.what_if);
+    renderEvidence(data.evidence);
+    chatHistory.push({role:'user',content:text},{role:'assistant',content:data.answer||''});
+  }catch(err){
+    console.error('챗봇 응답 실패:',err);
+    typing.remove();
+    chatAppend(chatEl('div','chat-msg bot error','답변을 가져오지 못했습니다. 잠시 후 다시 시도해주세요.'));
+  }finally{
+    chatBusy=false;
+    $('chatSendBtn').disabled=false;
+    if(!input.disabled) input.focus();
+  }
+}
+$('chatForm').addEventListener('submit',(e)=>{ e.preventDefault(); sendChat(); });

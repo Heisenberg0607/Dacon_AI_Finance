@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>깨움 KKAEUM</title>
-  <link rel="stylesheet" href="/static/styles.css?v=18" />
+  <link rel="stylesheet" href="/static/styles.css?v=19" />
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -308,9 +308,31 @@
         </section>
       </div>
     </section>
+    <!-- 보고서 화면 Report Q&A Agent. report-sheet 바깥에 두어 보고서 레이아웃과 인쇄 규칙에 영향을 주지 않는다. -->
+    <div id="chatDock" class="chat-dock no-print hidden">
+      <section id="chatPanel" class="chat-panel hidden" role="dialog" aria-label="깨움 AI 상담">
+        <header class="chat-head">
+          <div class="chat-head-title">
+            <b>깨움에게 물어보기</b>
+            <small id="chatScopeBadge">보고서 + 전체 상품 DB 기준</small>
+          </div>
+          <button id="chatCloseBtn" class="chat-icon-btn" type="button" aria-label="채팅 최소화">&#8722;</button>
+        </header>
+        <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
+        <div id="chatSuggestions" class="chat-suggestions"></div>
+        <form id="chatForm" class="chat-form" autocomplete="off">
+          <input id="chatInput" type="text" maxlength="800" placeholder="보고서에 대해 무엇이든 물어보세요" aria-label="질문 입력" />
+          <button id="chatSendBtn" class="chat-send" type="submit">전송</button>
+        </form>
+      </section>
+      <button id="chatFab" class="chat-fab" type="button" aria-expanded="false">
+        <span class="chat-fab-icon">AI</span>깨움에게 물어보기
+      </button>
+    </div>
+
   </main>
 
   <footer>깨움 KKAEUM · 당신의 AI 연금분석 비서</footer>
-  <script src="/static/app.js?v=18"></script>
+  <script src="/static/app.js?v=19"></script>
 </body>
 </html>

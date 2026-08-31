@@ -293,3 +293,70 @@ DC/IRP 분석의 기준선을 변경했습니다.
   - 75,000 → 750,000,000
 - `3,500만원`, `7.5억원`처럼 축약하지 않고 실제 원화 숫자를 그대로 표시합니다.
 - 차트 Y축도 동일하게 실제 원화 숫자로 표시합니다.
+
+
+## V19 보고서 화면 RAG 챗봇 (Report Q&A Agent)
+
+3단계 보고서 화면 우하단에 플로팅 챗봇을 추가했습니다. 사용자의 입력값, 분석결과 JSON,
+PDF 코퍼스를 근거로 후속 질문에 답합니다. 기존 원칙을 그대로 승계합니다.
+
+> 숫자는 Python이 만들고, LLM은 검색·해석·설명만 한다. 문서에 없는 값은 만들지 않는다.
+
+### 동작
+
+```text
+보고서 화면 질문
+      ↓
+Report Q&A Agent (Qwen function calling, 최대 4턴)
+      ↓
+ ┌──────────────────────┬──────────────────────┬────────────────────┐
+ ↓                      ↓                      ↓
+search_pension_documents  simulate_what_if      get_analysis_section
+ (선택 PDF / 전체 54개)    (Python 재계산)        (분석결과 원본)
+ └──────────────────────┴──────────────────────┴────────────────────┘
+      ↓
+결정론적 가드레일 (Critic Agent와 동일 규칙)
+      ↓ 위반 시 1회 재생성, 두 번째도 실패하면 차단
+답변 + 근거 카드(E1, E2...) + 재계산 시나리오 카드
+```
+
+### 주요 특징
+
+- **what-if 재계산**: "납입액을 1200만원으로 늘리면?", "은퇴를 65세로 늦추면?", "안전자산 20%면?"
+  → `tools.py`의 기존 함수(`project_assets_by_return`, `monte_carlo_tool`, `_required_contribution`)로
+  Python이 즉석 재계산하고, 현재값과 시나리오를 나란히 비교해 보여줍니다. LLM은 새 수식을 쓰지 않습니다.
+- **입력 클램프**: 납입액은 0~연소득의 60%, 안전자산 비중 0~100%, 은퇴 나이는 모델 제약 범위로 제한하며,
+  조정이 걸리면 그 사실을 답변에 명시합니다. 실제 원화 숫자(12,000,000)를 넣어도 내부 만원 스케일로 환산합니다.
+- **DB형 분기**: DB에는 납입액·자산배분 시나리오를 적용하지 않고 비적용 사유를 안내합니다.
+  은퇴 나이와 임금상승률 시나리오만 계산합니다.
+- **전체 코퍼스 개방**: 다른 상품과 비교하는 질문은 54개 PDF 전체에서 검색합니다.
+  다만 근거 카드마다 `내 상품` / `타 상품` 배지와 상품명을 항상 표시해, 다른 상품 내용이
+  내 상품 설명처럼 읽히지 않도록 UI에서 구조적으로 구분합니다.
+- **가드레일**: 억/만원 축약 표기, 수익 보장 표현, 존재하지 않는 근거 ID 인용을 Critic Agent와
+  동일한 `backend/guardrails.py` 규칙으로 검사합니다.
+- **demo 폴백**: Qwen API 키가 없어도 키워드 라우팅으로 목표달성률·확률·상품구성·자산배분·납입액·
+  위험요인·근거출처 질문과 what-if 재계산이 모두 동작합니다.
+- 챗봇은 `no-print`라서 `PDF로 저장 / 인쇄` 결과에는 포함되지 않습니다.
+
+### API
+
+```text
+POST /api/analyze   → 응답에 analysis_id 추가 (분석 context를 서버 세션에 6시간 보관)
+POST /api/chat      → {analysis_id, message, history[]}
+                      {answer, evidence[], what_if, tool_trace[], search_scope, guardrail}
+```
+
+세션 저장소(`backend/session_store.py`)는 단일 프로세스 메모리입니다.
+멀티 워커로 배포하려면 파일 또는 Redis 백엔드로 교체해야 합니다.
+
+### 추가/변경 파일
+
+```text
+backend/chat_agent.py      Report Q&A Agent (도구 3종 · 가드레일 · demo 폴백)
+backend/session_store.py   analysis_id 기반 분석결과 세션 저장소
+backend/formatting.py      금액 포맷 유틸 (agents.py에서 분리, 챗봇과 공유)
+backend/guardrails.py      결정론적 검사 (Critic Agent와 챗봇이 공유)
+backend/rag.py             search()에 scope='selected'|'all' 추가 (기본값은 기존 동작)
+app.py                     /api/chat 추가, /api/analyze에 analysis_id 추가
+frontend/*                 플로팅 챗 패널 UI / 근거 칩 / 재계산 시나리오 카드
+```

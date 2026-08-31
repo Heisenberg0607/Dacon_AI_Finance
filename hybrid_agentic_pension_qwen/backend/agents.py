@@ -4,6 +4,12 @@ import json
 import re
 from typing import Any
 
+from .formatting import (
+    contains_converted_money_unit as _contains_converted_money_unit,
+    raw_amount as _raw_amount,
+    won_amount as _won_amount,
+)
+from .guardrails import guarantee_phrase_issues, invalid_citation_issues, money_unit_issues
 from .models import UserPensionInput
 from .product_extractor import ProductExtractionAgent
 from .qwen_client import QwenGateway
@@ -73,35 +79,6 @@ TOOL_DEFINITIONS = [
         },
     },
 ]
-
-
-def _raw_amount(value: Any) -> str:
-    """Format an internal monetary numeric value without converting its scale or appending a unit."""
-    try:
-        n = float(value)
-    except (TypeError, ValueError):
-        return '-'
-    if n.is_integer():
-        return f"{int(n):,}"
-    return f"{n:,.2f}".rstrip('0').rstrip('.')
-
-
-
-def _won_amount(value: Any) -> str:
-    """Convert an internal 만원-scale monetary value to the actual KRW numeric amount.
-
-    Example: 5000 -> "50,000,000"
-    """
-    try:
-        n = float(value)
-    except (TypeError, ValueError):
-        return '-'
-    return f"{round(n * 10000):,}"
-
-
-def _contains_converted_money_unit(value: Any) -> bool:
-    text = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
-    return bool(re.search(r'\d[\d,.]*\s*(?:억\s*원|억원|만\s*원|만원)', text))
 
 
 class HybridAgenticWorkflow:
@@ -394,14 +371,10 @@ class HybridAgenticWorkflow:
                     issues.append('추천 설명이 계산과 반대임: 안전자산 비중이 증가했는데 성장형/위험자산 확대라고 표현함')
                 if expected_direction == '안전자산 비중 축소' and re.search(r'(안전자산|원리금보장).{0,18}(확대|증가|늘리|높이)', text):
                     issues.append('추천 설명이 계산과 반대임: 안전자산 비중이 감소했는데 안전자산 확대라고 표현함')
-        if any(word in text for word in ['수익 보장', '확실히 달성', '무조건 달성']):
-            issues.append('수익 또는 목표달성을 보장하는 표현 금지')
-        if _contains_converted_money_unit(recommendation):
-            issues.append('금액을 억/만원 형태로 축약하지 말고 amount_display의 실제 원화 숫자를 그대로 표시해야 함')
+        issues += guarantee_phrase_issues(text)
+        issues += money_unit_issues(recommendation)
         valid_e = {x['evidence_id'] for x in context['rag'].get('results', [])}
-        for c in recommendation.get('citations', []) or []:
-            if c not in valid_e:
-                issues.append(f'존재하지 않는 근거 ID 인용: {c}')
+        issues += invalid_citation_issues(recommendation.get('citations'), valid_e)
         if user.operation_type != 'DB' and not context['rag'].get('results'):
             issues.append('DC/IRP 상품 분석에 필요한 선택 상품 PDF RAG 근거가 없음')
         return issues

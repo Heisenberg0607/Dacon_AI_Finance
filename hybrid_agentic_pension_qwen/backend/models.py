@@ -81,3 +81,28 @@ class UserPensionInput(BaseModel):
         if self.operation_type != 'DB' or self.current_tenure_years is None:
             return None
         return self.current_tenure_years + self.expected_additional_tenure_years
+
+
+class ChatTurn(BaseModel):
+    role: Literal['user', 'assistant']
+    content: str = Field(max_length=4000)
+
+
+class ChatRequest(BaseModel):
+    """보고서 화면 챗봇 요청.
+
+    분석 결과 전체는 서버 세션(session_store)에 있으므로 analysis_id만 주고받는다.
+    """
+
+    analysis_id: str = Field(min_length=8, max_length=64)
+    message: str = Field(min_length=1, max_length=800)
+    history: list[ChatTurn] = Field(default_factory=list)
+
+    @model_validator(mode='after')
+    def trim_history(self):
+        # 최근 6턴만 유지해 프롬프트 길이를 제한한다.
+        self.history = self.history[-6:]
+        self.message = self.message.strip()
+        if not self.message:
+            raise ValueError('질문 내용이 비어 있습니다.')
+        return self

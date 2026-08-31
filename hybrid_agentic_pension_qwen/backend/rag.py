@@ -131,21 +131,29 @@ class PensionRAG:
         product_name: str | None = None,
         risk_type: str | None = None,
         top_k: int = 6,
+        scope: str = 'selected',
     ) -> dict[str, Any]:
+        """scope='selected'는 선택 상품 PDF 안에서만, scope='all'은 전체 코퍼스에서 검색한다.
+
+        분석 파이프라인(agents.py)은 기본값 'selected'를 그대로 사용해 기존 동작을 유지하고,
+        보고서 챗봇만 'all'로 전체 상품 DB를 열어 비교 질문에 답한다.
+        """
+        scope = scope if scope in {'selected', 'all'} else 'selected'
         if not self.chunks:
-            return {'mode': self.mode, 'query': query, 'results': []}
+            return {'mode': self.mode, 'query': query, 'search_scope': scope, 'results': []}
 
         resolved = self.resolve_product(provider, product_name) if product_name else None
-        exact_file_id = resolved.get('file_id') if resolved else None
+        selected_file_id = resolved.get('file_id') if resolved else None
+        exact_file_id = selected_file_id if scope == 'selected' else None
         q_tokens = set(tokenize(query))
         semantic = self._semantic_scores(query)
         scored = []
 
         for i, c in enumerate(self.chunks):
-            # 상품이 선택된 경우 전체 DB를 뒤지지 않고 그 공식 PDF 내부에서만 검색한다.
+            # scope='selected'에서 상품이 특정되면 전체 DB를 뒤지지 않고 그 공식 PDF 내부에서만 검색한다.
             if exact_file_id and c.get('file_id') != exact_file_id:
                 continue
-            if provider and not exact_file_id and c.get('provider') != provider:
+            if scope == 'selected' and provider and not exact_file_id and c.get('provider') != provider:
                 continue
 
             toks = self.doc_tokens[i]
@@ -156,6 +164,9 @@ class PensionRAG:
                 score = float(semantic[i]) * 1.6 + lexical * 0.55
             if risk_type and c.get('risk_type') == risk_type:
                 score += 0.2
+            # 전체 코퍼스를 열더라도 사용자 본인이 가입한 상품 근거가 상위에 남도록 소폭 가산한다.
+            if scope == 'all' and selected_file_id and c.get('file_id') == selected_file_id:
+                score += 0.15
             scored.append((score, i))
 
         scored.sort(reverse=True)
@@ -187,7 +198,9 @@ class PensionRAG:
         return {
             'mode': self.mode,
             'query': query,
+            'search_scope': scope,
             'resolved_product': resolved,
+            'selected_file_id': selected_file_id,
             'exact_product_filter': bool(exact_file_id),
             'results': results,
         }
