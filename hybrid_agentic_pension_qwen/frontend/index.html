@@ -181,11 +181,27 @@
       </div>
 
       <div class="workflow-layout">
-        <div class="agent-core-card">
-          <div class="agent-orb"><span>AI</span></div>
+        <div class="agent-core-card" id="agentCoreCard">
+          <div class="agent-orb">
+            <!-- v20: 링 게이지. 서버가 실측한 과거 소요시간 대비 경과 비율만 그린다. -->
+            <svg class="orb-progress" viewBox="0 0 160 160" aria-hidden="true">
+              <circle class="orb-progress-track" cx="80" cy="80" r="76"></circle>
+              <circle class="orb-progress-fill" id="waitRing" cx="80" cy="80" r="76"></circle>
+            </svg>
+            <span>AI</span>
+          </div>
           <p>깨움 AI 에이전트</p>
           <strong id="agentState">상황 분석 / 작업 계획</strong>
           <small id="agentDetail">사용자 입력을 구조화합니다.</small>
+
+          <!-- v20: 남은 대기시간. 근거는 /api/eta가 돌려주는 과거 실측 이력뿐이며,
+               이력이 없거나 예상을 넘기면 숫자를 지어내지 않고 비확정 상태로 표시한다. -->
+          <div class="wait-meter" id="waitMeter" role="status" aria-live="polite">
+            <span class="wait-label" id="waitLabel">예상 남은 시간</span>
+            <strong class="wait-value" id="waitRemaining">-</strong>
+            <div class="wait-track"><i id="waitBar"></i></div>
+            <small class="wait-basis" id="waitBasis">-</small>
+          </div>
         </div>
 
         <div class="pipeline" id="pipeline">
@@ -243,6 +259,11 @@
             <p class="kicker">깨움 AI 퇴직연금 분석 보고서</p>
             <h2 id="reportTitle">AI 퇴직연금 건강검진 보고서</h2>
             <p id="reportMeta">-</p>
+            <!-- 보고서 생성 소요시간. 서버가 perf_counter로 실측한 값만 표시한다. -->
+            <p class="report-timing">
+              <span class="timing-chip">보고서 생성 소요시간 <b id="reportElapsed">-</b></span>
+              <em id="reportGeneratedAt">-</em>
+            </p>
           </div>
           <div class="score-ring">
             <span>목표 달성률</span>

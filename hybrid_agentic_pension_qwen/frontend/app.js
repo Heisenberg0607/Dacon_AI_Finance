@@ -23,6 +23,21 @@ function fmtMoney(v){
   return won.toLocaleString('ko-KR');
 }
 function fmtPct(v, d=0){ return `${Number(v||0).toFixed(d)}%`; }
+function fmtDuration(sec){
+  // 서버가 실측한 초 단위 소요시간을 사람이 읽는 형태로 바꾼다. 값이 없으면 만들어내지 않는다.
+  const n = Number(sec);
+  if(!isFinite(n) || n < 0) return '-';
+  if(n < 60) return `${n.toFixed(1)}초`;
+  const m = Math.floor(n/60), s2 = n - m*60;
+  return `${m}분 ${s2.toFixed(0)}초`;
+}
+function fmtDateTime(iso){
+  if(!iso) return '-';
+  const d = new Date(iso);
+  if(isNaN(d)) return '-';
+  const p2 = (x)=>String(x).padStart(2,'0');
+  return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+}
 function esc(v){ return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
 
 async function init(){
@@ -228,6 +243,12 @@ const TOOL_KO = {
   'Finance Engine':'금융 계산 엔진',
   'Monte Carlo Simulation':'몬테카를로 시뮬레이션',
   'Portfolio Optimizer':'포트폴리오 최적화',
+  // 백엔드 trace가 실제로 담는 tool 이름(function calling 이름)도 한글로 표시한다.
+  'analyze_profile':'사용자 프로필 분석',
+  'search_product_rag':'금융지식 검색',
+  'run_finance_engine':'금융 계산 엔진',
+  'run_monte_carlo':'몬테카를로 시뮬레이션',
+  'optimize_retirement_strategy':'포트폴리오 최적화',
   'Recommendation Agent':'맞춤 전략 생성',
   'Critic Agent':'전략 검증 에이전트',
   'Report Generator':'보고서 생성'
@@ -272,9 +293,84 @@ function resetNodes(){ ['profile','rag','product_extraction','finance','monte_ca
 function log(tag,msg){ const p=document.createElement('p'); p.innerHTML=`<i>${esc(tag)}</i>${esc(msg)}`; $('traceLog').appendChild(p); $('traceLog').scrollTop=$('traceLog').scrollHeight; }
 const delay = ms => new Promise(r=>setTimeout(r,ms));
 
+// v20: 2단계 대기 화면의 "예상 남은 시간" 게이지.
+// 근거는 서버가 perf_counter로 실측해 쌓은 과거 소요시간(/api/eta)뿐이다.
+// 이력이 없거나 예상치를 넘긴 뒤에는 남은 시간을 지어내지 않고 비확정 상태로 표시한다.
+const WAIT_RING_LENGTH = 477.52;  // 2 * PI * r(76). styles.css의 stroke-dasharray와 같은 값.
+let waitTimer=null, waitStartedAt=0, waitEstimate=null;
+
+function fmtRemaining(sec){
+  // 남은 시간은 초 단위로 올림해 0초에서 멈춘 것처럼 보이지 않게 한다.
+  const n=Math.max(0, Math.ceil(Number(sec)||0));
+  if(n<60) return `${n}초`;
+  const m=Math.floor(n/60), s2=n%60;
+  return s2 ? `${m}분 ${s2}초` : `${m}분`;
+}
+function setWaitProgress(ratio){
+  const r=Math.max(0, Math.min(1, Number(ratio)||0));
+  const ring=$('waitRing'); if(ring) ring.style.strokeDashoffset=String(WAIT_RING_LENGTH*(1-r));
+  const bar=$('waitBar'); if(bar) bar.style.width=`${(r*100).toFixed(1)}%`;
+}
+function renderWaitMeter(){
+  const card=$('agentCoreCard'); if(!card) return;
+  const elapsed=(performance.now()-waitStartedAt)/1000;
+  const elapsedText=`경과 ${fmtDuration(elapsed)}`;
+  if(!waitEstimate){
+    // 실측 이력이 없는 첫 분석. 남은 시간을 추정할 근거가 없다.
+    card.classList.add('is-indeterminate'); card.classList.remove('is-overrun');
+    $('waitLabel').textContent='분석 진행 중';
+    $('waitRemaining').textContent='예상 시간 산출 전';
+    $('waitBasis').textContent=`${elapsedText} · 실측 이력이 쌓이면 남은 시간을 표시합니다`;
+    return;
+  }
+  const expected=waitEstimate.expected_seconds;
+  const basis=`${elapsedText} · 최근 ${waitEstimate.sample_size}회 실측 중앙값 ${fmtDuration(expected)} 기준`;
+  const remaining=expected-elapsed;
+  if(remaining<=0){
+    // 예상치를 넘겼다. 남은 시간을 새로 지어내지 않고 초과 상태만 알린다.
+    card.classList.add('is-indeterminate','is-overrun');
+    $('waitLabel').textContent='예상 시간 초과';
+    $('waitRemaining').textContent='마무리 중입니다';
+    $('waitBasis').textContent=basis;
+    setWaitProgress(1);
+    return;
+  }
+  card.classList.remove('is-indeterminate','is-overrun');
+  $('waitLabel').textContent='예상 남은 시간';
+  $('waitRemaining').textContent=`약 ${fmtRemaining(remaining)}`;
+  $('waitBasis').textContent=basis;
+  setWaitProgress(elapsed/expected);
+}
+function startWaitMeter(operationType){
+  waitStartedAt=performance.now(); waitEstimate=null;
+  const card=$('agentCoreCard'); if(card) card.classList.remove('is-overrun');
+  $('waitMeter').classList.remove('hidden');
+  setWaitProgress(0);
+  renderWaitMeter();
+  waitTimer=setInterval(renderWaitMeter, 250);
+  // 예상치 조회가 분석 요청을 늦추지 않도록 병렬로 가져오고, 도착하면 그때부터 반영한다.
+  fetch(`/api/eta?operation_type=${encodeURIComponent(operationType)}`, {cache:'no-store'})
+    .then(r=>r.ok?r.json():null)
+    .then(d=>{ if(d && d.available && waitTimer){ waitEstimate=d; renderWaitMeter(); } })
+    .catch(()=>{ /* 예상치는 부가 정보다. 실패해도 비확정 표시로 계속 진행한다. */ });
+}
+function finishWaitMeter(result){
+  if(waitTimer) clearInterval(waitTimer);
+  waitTimer=null;
+  const card=$('agentCoreCard'); if(!card) return;
+  card.classList.remove('is-indeterminate','is-overrun');
+  const total=result && result.timing ? result.timing.total_seconds : null;
+  if(total==null){ $('waitMeter').classList.add('hidden'); return; }
+  setWaitProgress(1);
+  $('waitLabel').textContent='분석 완료';
+  $('waitRemaining').textContent='0초';
+  $('waitBasis').textContent=`실측 소요시간 ${fmtDuration(total)}`;
+}
+
 let progressTimer=null; let progressIndex=0;
 const pendingStages=[['profile','PF','사용자 프로필을 구조화합니다.'],['rag','RAG','선택한 상품의 공식 PDF 내부에서 근거를 검색합니다.'],['product_extraction','PX','Qwen이 선택 상품 PDF에서 구성상품과 비중을 구조화합니다.'],['finance','FIN','PDF 추출값을 Python 금융엔진에 넣어 목표자산과 예상 은퇴자산을 계산합니다.'],['monte_carlo','MC','확률 기반 은퇴자산 분포를 시뮬레이션합니다.'],['optimizer','OPT','제약조건 안에서 후보 전략을 탐색합니다.'],['recommendation','REC','개인화 추천안을 생성합니다.'],['critic','CR','추천의 적합성과 근거를 검증합니다.'],['report','RP','검증된 결과로 보고서를 생성합니다.']];
 function startPendingAnimation(operationType){
+  startWaitMeter(operationType);
   resetNodes(); progressIndex=0; $('traceLog').innerHTML='<p><i>시스템</i>분석 요청을 접수했습니다.</p>';
   const extractionNode=node('product_extraction');
   if(extractionNode) extractionNode.classList.toggle('hidden', operationType==='DB');
@@ -287,7 +383,7 @@ function startPendingAnimation(operationType){
   };
   tick(); progressTimer=setInterval(tick,900);
 }
-function stopPendingAnimation(){ if(progressTimer) clearInterval(progressTimer); progressTimer=null; }
+function stopPendingAnimation(result){ if(progressTimer) clearInterval(progressTimer); progressTimer=null; finishWaitMeter(result); }
 
 $('pensionForm').addEventListener('submit', async(e)=>{
   e.preventDefault();
@@ -300,7 +396,7 @@ $('pensionForm').addEventListener('submit', async(e)=>{
   try{
     const res=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
     if(!res.ok){ throw new Error(await res.text()); }
-    const result=await res.json(); lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(); await replayTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
+    const result=await res.json(); lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(result); await replayTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
   }catch(err){ stopPendingAnimation(); log('ERR',err.message); alert('분석 중 오류가 발생했습니다. .env의 Qwen 설정 또는 서버 로그를 확인해주세요.'); $('inputView').classList.remove('hidden'); $('workflowView').classList.add('hidden'); }
   finally{ btn.disabled=false; btn.querySelector('span').textContent='깨움 분석 시작'; }
 });
@@ -315,11 +411,27 @@ async function replayTrace(result){
     if(node(stage)) setNode(stage, t.status==='retry'?'retry':'running');
     $('agentState').textContent=toolKo(t.tool || stage);
     $('agentDetail').textContent=t.selected_by ? `${selectedByKo(t.selected_by)} 방식으로 이 단계를 실행했습니다.` : '실행 중입니다.';
-    log(toolKo(t.tool||stage).slice(0,10), t.error ? `오류: ${t.error}` : `${statusKo(t.status)}${t.selected_by?` · ${selectedByKo(t.selected_by)}`:''}${t.reason?` · ${t.reason}`:''}`);
+    const took = t.elapsed_seconds == null ? '' : ` · ${fmtDuration(t.elapsed_seconds)}`;
+    log(toolKo(t.tool||stage).slice(0,10), t.error ? `오류: ${t.error}` : `${statusKo(t.status)}${t.selected_by?` · ${selectedByKo(t.selected_by)}`:''}${took}${t.reason?` · ${t.reason}`:''}`);
     await delay(180);
     if(node(stage)) setNode(stage, t.status==='retry'?'retry':'done');
   }
-  $('agentState').textContent='분석 완료'; $('agentDetail').textContent='전략 검증을 거친 최종 보고서가 준비되었습니다.';
+  const totalTook = result.timing && result.timing.total_seconds != null ? ` 총 소요시간 ${fmtDuration(result.timing.total_seconds)}.` : '';
+  $('agentState').textContent='분석 완료'; $('agentDetail').textContent=`전략 검증을 거친 최종 보고서가 준비되었습니다.${totalTook}`;
+}
+
+function renderTiming(timing){
+  // 서버가 실측한 값이 없으면 소요시간 영역을 감춘다. 프런트에서 임의로 추정하지 않는다.
+  const box = document.querySelector('.report-timing');
+  if(!box) return;
+  if(!timing || timing.total_seconds == null){ box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  $('reportElapsed').textContent = fmtDuration(timing.total_seconds);
+  $('reportGeneratedAt').textContent = `생성 완료 ${fmtDateTime(timing.finished_at)}`;
+  const stages = Array.isArray(timing.stages) ? timing.stages : [];
+  $('reportElapsed').parentElement.title = stages.length
+    ? stages.map(s=>`${toolKo(s.tool || s.stage)} ${fmtDuration(s.seconds)}${s.runs>1?` (${s.runs}회)`:''}`).join('\n')
+    : '';
 }
 
 function renderReport(r){
@@ -328,6 +440,7 @@ function renderReport(r){
   $('reportTitleTop').textContent=rep.title||'AI 퇴직연금 건강검진 보고서';
   $('reportTitle').textContent=rep.title||'AI 퇴직연금 건강검진 보고서';
   $('reportMeta').textContent = isDB ? 'DB형 · 임금/근속 기반 분석' : `${u.provider} · ${u.product_name} · ${u.operation_type} · ${u.investment_type}`;
+  renderTiming(r.timing);
   $('goalRate').textContent=fmtPct(f.goal_rate_pct);
 
   if(isDB){
