@@ -14,6 +14,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 @media(max-width:1080px){#inputView{grid-template-columns:1fr}.hero-copy{position:static}.workflow-layout{grid-template-columns:1fr}.agent-core-card{min-height:320px}.two-col{grid-template-columns:1fr}.metric-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:720px){.site-header,.section-head,.report-toolbar,.report-cover{flex-direction:column;align-items:flex-start}.site-header h1{font-size:38px}.site-header h1 .brand-en{font-size:.54em;margin-left:6px}.sub{font-size:14px}#inputView .step-label{font-size:13px}.site-header,.page{padding-left:16px;padding-right:16px}.form-grid,.pipeline,.evidence-grid,.check-grid,.metric-grid{grid-template-columns:1fr}.pipeline-node.wide{grid-column:auto}.report-sheet{padding:18px}.toolbar-actions{width:100%}.toolbar-actions button{flex:1}.score-ring{width:100px;height:100px}.hero-copy h2,.section-head h2,.report-toolbar h2{font-size:27px}.allocation-row{grid-template-columns:105px minmax(0,1fr) 42px}}
 @media print{body{background:white;color:#111}.ambient,.site-header,#inputView,#workflowView,.no-print,footer{display:none!important}.page{max-width:none;padding:0}.report-sheet{display:block!important;border:0;box-shadow:none;background:white;color:#111;padding:0}.report-section,.report-cover{border-color:#ddd}.metric-grid article,.mini-panel,.allocation-card,.evidence-card,.fact-list div,.action-list div,.risk-list div,.check-grid div{border-color:#ddd;background:white}.lead-text,.mini-panel p:last-child,.caption,.risk-list div,.evidence-card p,.metric-grid span,.metric-grid small,.report-cover>div>p:last-child,.report-cover>div>p#reportMeta,.report-timing em{color:#444}.timing-chip{color:#0b7a4f;border-color:#9fcab7;background:white}.chart-box{background:white;border-color:#ddd}.kicker,.step-label,.mini-kicker,.score-ring strong,.report-section-title>span,.evidence-card b,.allocation-foot strong{color:#0b7a4f}.report-section-title>span{background:#e8f7ef}.score-ring{border-color:#9fcab7;background:white}}
+
 /* v3: operation type / DB-aware form behavior */
 .field-hint{display:block;margin-top:-2px;color:var(--muted);font-size:9px;line-height:1.45}
 .field.is-hidden{display:none!important}
@@ -21,11 +22,13 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 .field-hint.db-note{color:var(--yellow)}
 
 .db-allocation-note{padding:14px;border:1px dashed var(--line);border-radius:12px;color:var(--muted);font-size:11px;line-height:1.6}
+
 /* v4: align operation type and provider controls exactly */
 .form-grid{align-items:start}
 .field>span{min-height:18px;display:flex;align-items:flex-end}
 .field>select,.field>.money-input{height:52px}
 .field select,.field .money-input input{height:52px;min-height:52px}
+
 /* v7: operation-type buttons + DB/DC/IRP conditional input groups */
 .field input[type="number"]{
   color-scheme:dark;
@@ -35,6 +38,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   opacity:1;
   filter:invert(1) brightness(1.7);
 }
+
 .operation-block{
   margin-top:18px;
   padding-top:18px;
@@ -69,7 +73,9 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   box-shadow:0 0 0 3px rgba(85,239,170,.055);
 }
 .operation-btn:active{transform:translateY(1px)}
+
 .conditional-section.is-hidden{display:none!important}
+
 .conditional-section{
   margin-top:18px;
   padding:18px;
@@ -141,6 +147,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 .derived-value small{font-size:9px;color:var(--muted);text-align:right}
 .salary-history-field{grid-column:1/-1}
 .salary-history-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+
 @media(max-width:720px){
   .operation-buttons{grid-template-columns:repeat(3,1fr)}
   .salary-history-grid{grid-template-columns:1fr}
@@ -157,6 +164,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   letter-spacing:-.025em;
   color:var(--green2);
 }
+
 .field input::placeholder{
   color:#62736b;
   font-size:14px;
@@ -190,6 +198,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   font-weight:750;
   white-space:nowrap;
 }
+
 /* v10: remove native number steppers and unify field-label typography */
 .field input[type="number"]{
   appearance:textfield;
@@ -202,6 +211,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   margin:0;
   display:none;
 }
+
 /* Match all form field titles to the stronger mint input-value typography. */
 .field>span,
 .operation-label{
@@ -227,6 +237,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 
 
 /* v11: age units + stronger analysis headers + larger DB helper text */
+
 /* Current/retirement age use the same right-side unit treatment as money/year fields. */
 .field>.age-unit{
   height:52px;
@@ -245,6 +256,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   letter-spacing:-.03em;
   line-height:1.22;
 }
+
 /* Increase the two small explanatory texts called out in the DB section. */
 .derived-value small{
   font-size:13px;
@@ -253,6 +265,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   color:#8fa39a;
   text-align:right;
 }
+
 #wageGrowthHint{
   font-size:13px;
   line-height:1.55;
@@ -281,6 +294,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 
 /* v15: extracted product details preserve line breaks */
 #productAnalysis{white-space:pre-line;}
+
 /* ---- Report Q&A Agent (보고서 화면 플로팅 챗봇) ---- */
 .chat-dock{position:fixed;right:24px;bottom:24px;z-index:40;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
 .chat-fab{display:inline-flex;align-items:center;gap:9px;border:1px solid rgba(85,239,170,.42);border-radius:999px;background:linear-gradient(145deg,rgba(16,31,25,.98),rgba(7,17,13,.98));color:var(--green);font-size:12px;font-weight:800;letter-spacing:-.01em;padding:13px 18px;cursor:pointer;box-shadow:0 18px 45px rgba(0,0,0,.4)}
@@ -332,6 +346,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   .chat-fab{margin:0 14px 14px;justify-content:center}
   .chat-panel{width:auto;max-width:none;max-height:78vh;border-radius:18px 18px 0 0;border-bottom:0}
 }
+
 /* v20: 2단계 대기 화면 - 남은 대기시간 게이지
    determinate 표시는 서버 실측 이력(/api/eta)이 있을 때만이고,
    이력이 없거나 예상치를 넘긴 뒤에는 .is-indeterminate로 전환해 숫자를 단정하지 않는다. */
@@ -344,6 +359,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   filter:drop-shadow(0 0 7px rgba(85,239,170,.5));
   transition:stroke-dashoffset .45s linear;
 }
+
 .wait-meter{
   width:100%;max-width:232px;margin-top:22px;padding-top:17px;
   border-top:1px solid var(--line);display:grid;gap:8px;justify-items:center;
@@ -361,6 +377,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 .wait-meter .wait-basis{
   margin-top:0;max-width:none;color:var(--muted);font-size:10px;line-height:1.55;text-align:center;
 }
+
 /* 예상 시간을 확정할 수 없는 구간: 링과 바를 진행중 애니메이션으로 돌린다. */
 .agent-core-card.is-indeterminate .orb-progress-fill{
   stroke-dasharray:115 363;stroke-dashoffset:0;transition:none;
@@ -375,22 +392,9 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 .agent-core-card.is-overrun .wait-value{color:var(--yellow)}
 .agent-core-card.is-overrun .orb-progress-fill{stroke:var(--yellow);filter:drop-shadow(0 0 7px rgba(239,199,109,.45))}
 .agent-core-card.is-overrun .wait-track i{background:linear-gradient(90deg,var(--yellow),var(--green))}
+
 @media(prefers-reduced-motion:reduce){
   .agent-core-card.is-indeterminate .orb-progress-fill,
   .agent-core-card.is-indeterminate .wait-track i{animation:none}
 }
 @media(max-width:1080px){.wait-meter{max-width:280px}}
-
-/* v21: chatbot scrollbar matches the dark UI and report-title text color */
-.chat-messages{
-  scrollbar-width:thin;
-  scrollbar-color:var(--text) var(--panel);
-}
-.chat-messages::-webkit-scrollbar{width:10px}
-.chat-messages::-webkit-scrollbar-track{background:var(--panel)}
-.chat-messages::-webkit-scrollbar-thumb{
-  background:var(--text);
-  border:2px solid var(--panel);
-  border-radius:999px;
-}
-.chat-messages::-webkit-scrollbar-corner{background:var(--panel)}
