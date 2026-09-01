@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+from datetime import datetime
 from typing import Any
 
 from .formatting import (
@@ -79,6 +81,39 @@ TOOL_DEFINITIONS = [
         },
     },
 ]
+
+
+class TimedTrace(list):
+    """단계별 소요시간을 자동으로 기록하는 trace 리스트.
+
+    - append(entry): 직전 mark 이후 경과시간을 entry['elapsed_seconds']에 기록한다.
+      (작업을 먼저 하고 결과를 append 하는 단계용)
+    - stamp_last(): 이미 append된 마지막 entry의 소요시간을 지금 시점 기준으로 다시 기록한다.
+      ('running' 상태로 먼저 append 하고 작업 후 상태를 갱신하는 단계용)
+    시간은 Python이 측정하며 LLM이 만들어내지 않는다.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started_at = datetime.now()
+        self._start = time.perf_counter()
+        self._mark = self._start
+
+    def append(self, entry: dict[str, Any]) -> None:  # type: ignore[override]
+        now = time.perf_counter()
+        entry['elapsed_seconds'] = round(now - self._mark, 2)
+        self._mark = now
+        super().append(entry)
+
+    def stamp_last(self) -> None:
+        now = time.perf_counter()
+        if self:
+            self[-1]['elapsed_seconds'] = round(now - self._mark, 2)
+        self._mark = now
+
+    @property
+    def total_seconds(self) -> float:
+        return round(time.perf_counter() - self._start, 2)
 
 
 class HybridAgenticWorkflow:
@@ -504,8 +539,21 @@ class HybridAgenticWorkflow:
             return parsed
         return self._fallback_report(user, context, recommendation, critic)
 
+    @staticmethod
+    def _stage_durations(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """trace를 단계 단위로 합산해 보고서에 보여줄 소요시간 breakdown을 만든다."""
+        totals: dict[str, dict[str, Any]] = {}
+        for entry in trace:
+            stage = entry.get('stage') or 'unknown'
+            slot = totals.setdefault(stage, {'stage': stage, 'tool': entry.get('tool'), 'seconds': 0.0, 'runs': 0})
+            slot['seconds'] += float(entry.get('elapsed_seconds') or 0.0)
+            slot['runs'] += 1
+        for slot in totals.values():
+            slot['seconds'] = round(slot['seconds'], 2)
+        return list(totals.values())
+
     def run(self, user: UserPensionInput) -> dict[str, Any]:
-        trace: list[dict[str, Any]] = []
+        trace = TimedTrace()
         context: dict[str, Any] = {}
         planner_mode = 'Qwen function calling' if self.qwen.enabled else 'demo fallback orchestrator'
 
@@ -521,10 +569,12 @@ class HybridAgenticWorkflow:
         trace.append({'stage': 'recommendation', 'tool': 'Recommendation Agent', 'status': 'running', 'selected_by': 'Qwen' if self.qwen.enabled else 'fallback'})
         recommendation = self._recommendation_agent(user, context)
         trace[-1]['status'] = 'done'
+        trace.stamp_last()
 
         trace.append({'stage': 'critic', 'tool': 'Critic Agent', 'status': 'running', 'selected_by': 'Qwen' if self.qwen.enabled else 'fallback'})
         critic = self._critic_agent(user, context, recommendation)
         trace[-1]['status'] = 'done' if critic.get('passed') else 'retry'
+        trace.stamp_last()
         iterations = 1
 
         if not critic.get('passed'):
@@ -532,13 +582,24 @@ class HybridAgenticWorkflow:
             revision = critic.get('revision_instructions') or '; '.join(critic.get('issues') or [])
             trace.append({'stage': 'recommendation', 'tool': 'Recommendation Agent', 'status': 'retry', 'selected_by': 'Qwen' if self.qwen.enabled else 'fallback', 'reason': revision})
             recommendation = self._recommendation_agent(user, context, critique=revision)
+            trace.stamp_last()
             critic = self._critic_agent(user, context, recommendation)
             trace.append({'stage': 'critic', 'tool': 'Critic Agent', 'status': 'done' if critic.get('passed') else 'revised-with-warnings', 'selected_by': 'Qwen' if self.qwen.enabled else 'fallback'})
 
         report = self._report_agent(user, context, recommendation, critic)
         trace.append({'stage': 'report', 'tool': 'Report Generator', 'status': 'done', 'selected_by': 'Qwen' if self.qwen.enabled else 'template'})
 
+        finished_at = datetime.now()
+        timing = {
+            'total_seconds': trace.total_seconds,
+            'started_at': trace.started_at.isoformat(timespec='seconds'),
+            'finished_at': finished_at.isoformat(timespec='seconds'),
+            # 단계별 소요시간. 같은 단계가 재시도로 두 번 실행되면 합산한다.
+            'stages': self._stage_durations(trace),
+        }
+
         return {
+            'timing': timing,
             'mode': {'planner': planner_mode, 'qwen_enabled': self.qwen.enabled, 'rag': context.get('rag', {}).get('mode', self.rag.mode), 'iterations': iterations},
             'user': user.model_dump() | {
                 'years_to_retirement': user.years_to_retirement,

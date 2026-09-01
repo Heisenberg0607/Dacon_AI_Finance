@@ -3,3 +3,4 @@ __pycache__/
 .env
 data/embeddings.npy
 data/embeddings_meta.json
+data/run_timings.json

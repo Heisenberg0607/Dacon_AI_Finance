@@ -6,10 +6,11 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.agents import HybridAgenticWorkflow
 from backend.chat_agent import ReportChatAgent
-from backend.models import ChatRequest, UserPensionInput
+from backend.models import ChatRequest, OperationType, UserPensionInput
 from backend.qwen_client import QwenGateway
 from backend.rag import PensionRAG
 from backend.config import ROOT
+from backend.eta_store import RunTimeHistory
 from backend.session_store import AnalysisStore
 from backend.tools import estimate_wage_growth
 
@@ -20,6 +21,7 @@ rag = PensionRAG(qwen)
 workflow = HybridAgenticWorkflow(qwen, rag)
 chat_agent = ReportChatAgent(qwen, rag)
 analysis_store = AnalysisStore()
+run_times = RunTimeHistory()
 
 app = FastAPI(title='깨움 KKAEUM - Hybrid Agentic AI Workflow', version='1.9.0')
 app.mount('/static', StaticFiles(directory=FRONTEND), name='static')
@@ -47,6 +49,20 @@ def catalog():
     return {'providers': rag.providers(), 'products': rag.catalog}
 
 
+@app.get('/api/eta')
+def eta(operation_type: OperationType = 'DC'):
+    """2단계 대기 화면이 쓰는 예상 소요시간.
+
+    과거 분석의 실측 total_seconds 이력만 근거로 삼는다. 이력이 없으면
+    available=False로 응답하고, 화면은 임의의 숫자 대신 비확정 상태를 표시한다.
+    Qwen 실행과 demo fallback은 소요시간이 크게 다르므로 이력도 분리해 조회한다.
+    """
+    estimate = run_times.estimate(operation_type, qwen.enabled)
+    if estimate is None:
+        return {'available': False, 'operation_type': operation_type}
+    return {'available': True, **estimate}
+
+
 @app.post('/api/estimate-wage-growth')
 def wage_growth_estimate(user: UserPensionInput):
     # DB 입력폼에서 '깨움이 추정' 버튼이 호출하는 deterministic estimate.
@@ -65,6 +81,8 @@ def product_extraction(user: UserPensionInput):
 @app.post('/api/analyze')
 def analyze(user: UserPensionInput):
     result = workflow.run(user)
+    # 다음 사용자의 '예상 남은 시간'은 이 실측값들만 근거로 계산된다.
+    run_times.record(user.operation_type, (result.get('timing') or {}).get('total_seconds'), qwen.enabled)
     # 보고서 화면 챗봇이 같은 분석 context를 이어서 쓰도록 서버에 잠시 보관한다.
     result['analysis_id'] = analysis_store.put(user, result)
     return result
