@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 import re
 from typing import Any
 
@@ -226,10 +227,34 @@ def _fallback_extract(document: dict[str, Any]) -> dict[str, Any]:
 
 
 class ProductExtractionAgent:
+    """선택 상품 PDF를 Qwen으로 구조화한다.
+
+    추출은 PDF 전 페이지 텍스트(최대 52,000자)를 넣는 Qwen 호출 1회라 이 파이프라인에서
+    가장 비싼 단계다. 보고서 화면에서 상품을 바꿔가며 비교할 때 같은 상품을 반복 호출하지
+    않도록 file_id 기준으로 결과를 캐시한다.
+
+    코퍼스(chunks.jsonl)는 정적이고 file_id가 문서에 1:1 대응하므로 캐시 키로 안전하다.
+    캐시는 성공한 Qwen 추출만 담는다. fallback 결과까지 캐시하면 일시적 API 오류로 생긴
+    빈약한 추출이 프로세스가 살아 있는 내내 고착된다.
+    """
+
     def __init__(self, qwen: QwenGateway):
         self.qwen = qwen
+        self._cache: dict[str, dict[str, Any]] = {}
 
     def extract(self, document: dict[str, Any]) -> dict[str, Any]:
+        product = document.get('product') or {}
+        file_id = product.get('file_id')
+        if file_id and file_id in self._cache:
+            # 호출자가 matched_exact_product_pdf 등을 덧붙이므로 복사본을 준다.
+            return deepcopy(self._cache[file_id])
+
+        extracted = self._extract_uncached(document)
+        if file_id and extracted.get('source') == 'qwen_pdf_extraction':
+            self._cache[file_id] = deepcopy(extracted)
+        return extracted
+
+    def _extract_uncached(self, document: dict[str, Any]) -> dict[str, Any]:
         if not document.get('product'):
             return {
                 'source': 'not_found', 'calculation_ready': False,
