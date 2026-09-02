@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import statistics
+import math
 import threading
 from pathlib import Path
 from typing import Any
@@ -9,6 +9,23 @@ from typing import Any
 from backend.config import DATA_DIR
 
 TIMINGS_PATH = DATA_DIR / 'run_timings.json'
+# baseline은 저장소에 함께 커밋되는 읽기 전용 실측 이력이다.
+# 새로 클론한 환경에서도 첫 분석부터 남은 시간을 추정할 수 있게 해준다.
+BASELINE_PATH = DATA_DIR / 'run_timings_baseline.json'
+
+# 남은 시간은 백분위수로 잡는다. 중앙값을 쓰면 정의상 과거 실행의 절반이 그 값을 넘어
+# '예상 시간 초과' 상태가 상시로 뜬다. 80분위수는 표본의 80%가 그 안에 끝났다는 뜻이라
+# 초과가 5회에 1번꼴로 줄고, 임의의 안전계수를 곱하지 않아 근거가 실측 표본 안에 그대로 남는다.
+PERCENTILE = 80
+
+# 같은 실행모드 안에서 서로 참고할 수 있는 운영유형 순서.
+# DC/IRP는 상품 PDF 구조화 추출을 포함해 파이프라인이 같고,
+# DB는 그 단계를 건너뛰어 더 빠르므로 뒤에 둔다.
+RELATED_TYPES: dict[str, tuple[str, ...]] = {
+    'DC': ('IRP', 'DB'),
+    'IRP': ('DC', 'DB'),
+    'DB': ('DC', 'IRP'),
+}
 
 
 class RunTimeHistory:
@@ -21,17 +38,34 @@ class RunTimeHistory:
     운영유형별로 파이프라인이 다르므로(DB는 상품 PDF 구조화 추출을 건너뛴다)
     DB / DC / IRP 이력을 분리해서 쌓는다. Qwen 실행과 demo fallback은 소요시간이
     자릿수 단위로 다르므로 이 둘도 서로 다른 버킷에 넣는다. 섞이면 중앙값이 무의미해진다.
+
+    이력이 비어 있을 때를 대비해 근거를 아래 순서로 찾는다. 어느 단계에서 나온 값인지는
+    결과의 source에 담아 화면이 근거를 그대로 밝힐 수 있게 한다.
+
+      1. measured  - 이 PC의 라이브 이력, 정확히 같은 버킷
+      2. baseline  - 저장소에 커밋된 실측 baseline, 정확히 같은 버킷
+      3. related   - 같은 실행모드의 다른 운영유형 (라이브 -> baseline 순)
+
+    실행모드 경계는 넘지 않는다. demo(0.1초대)와 qwen(수십 초)을 섞으면 추정이 무의미해진다.
     """
 
-    def __init__(self, path: Path = TIMINGS_PATH, max_samples: int = 30) -> None:
+    def __init__(
+        self,
+        path: Path = TIMINGS_PATH,
+        max_samples: int = 30,
+        baseline_path: Path = BASELINE_PATH,
+    ) -> None:
         self.path = path
+        self.baseline_path = baseline_path
         self.max_samples = max_samples
         self._lock = threading.Lock()
-        self._samples: dict[str, list[float]] = self._load()
+        self._samples: dict[str, list[float]] = self._read(self.path)
+        # baseline은 서버가 절대 쓰지 않는다. 기동 시 한 번만 읽는다.
+        self._baseline: dict[str, list[float]] = self._read(self.baseline_path)
 
-    def _load(self) -> dict[str, list[float]]:
+    def _read(self, path: Path) -> dict[str, list[float]]:
         try:
-            raw = json.loads(self.path.read_text(encoding='utf-8'))
+            raw = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             return {}
         if not isinstance(raw, dict):
@@ -74,15 +108,46 @@ class RunTimeHistory:
             self._save()
 
     def estimate(self, operation_type: str, qwen_enabled: bool) -> dict[str, Any] | None:
-        """해당 운영유형 + 실행모드의 예상 소요시간. 실측 이력이 없으면 None."""
+        """예상 소요시간과 그 근거. 어디에도 실측값이 없으면 None."""
         with self._lock:
-            samples = list(self._samples.get(self._key(operation_type, qwen_enabled)) or [])
-        if not samples:
-            return None
+            live = dict(self._samples)
+        baseline = self._baseline
+
+        exact = self._key(operation_type, qwen_enabled)
+        for store, source in ((live, 'measured'), (baseline, 'baseline')):
+            samples = store.get(exact)
+            if samples:
+                return self._summarize(samples, operation_type, source)
+
+        # 같은 실행모드의 다른 운영유형으로 넘어간다. 근거가 된 유형을 함께 알린다.
+        for related in RELATED_TYPES.get(operation_type, ()):
+            key = self._key(related, qwen_enabled)
+            for store in (live, baseline):
+                samples = store.get(key)
+                if samples:
+                    result = self._summarize(samples, operation_type, 'related')
+                    result['basis_operation_type'] = related
+                    return result
+        return None
+
+    @staticmethod
+    def _percentile(samples: list[float], p: int) -> float:
+        """nearest-rank 백분위수. 표본의 p%가 이 값 이하다.
+
+        보간하지 않고 정렬된 표본에서 직접 고르므로 표본이 1건이어도 동작하고,
+        화면에 쓰는 '최근 N회 중 80%가 이 시간 안에 완료' 설명이 문자 그대로 참이 된다.
+        """
+        ordered = sorted(samples)
+        rank = math.ceil(p / 100 * len(ordered))
+        return ordered[max(0, rank - 1)]
+
+    @classmethod
+    def _summarize(cls, samples: list[float], operation_type: str, source: str) -> dict[str, Any]:
         return {
             'operation_type': operation_type,
-            # 중앙값은 한 번의 이상치(네트워크 지연 등)에 덜 흔들린다.
-            'expected_seconds': round(statistics.median(samples), 2),
+            'source': source,
+            'percentile': PERCENTILE,
+            'expected_seconds': round(cls._percentile(samples, PERCENTILE), 2),
             'min_seconds': round(min(samples), 2),
             'max_seconds': round(max(samples), 2),
             'sample_size': len(samples),

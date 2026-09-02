@@ -398,3 +398,77 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   .agent-core-card.is-indeterminate .wait-track i{animation:none}
 }
 @media(max-width:1080px){.wait-meter{max-width:280px}}
+
+/* v21: 2단계 진행 표시 - 카드 9개 -> 한 칸 스테퍼
+   현재 단계만 칸에 띄우고 다음 단계로 넘어가며, 하단 레일이 전체 진행 위치를 보여준다. */
+#pipeline{display:block}
+.stage-card{
+  height:100%;min-height:460px;border:1px solid var(--line);border-radius:20px;
+  background:linear-gradient(145deg,rgba(16,31,25,.97),rgba(7,17,13,.98));
+  padding:26px;display:grid;grid-template-rows:auto 1fr auto auto;gap:18px;
+  transition:border-color .3s ease,box-shadow .3s ease;
+}
+.stage-card.is-running{border-color:rgba(85,239,170,.5);box-shadow:0 18px 50px rgba(0,0,0,.22)}
+.stage-card.is-retry{border-color:rgba(239,199,109,.45)}
+
+.stage-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.stage-count{font-size:12px;color:var(--muted);letter-spacing:.08em;font-variant-numeric:tabular-nums}
+.stage-count b{font-size:20px;font-weight:900;color:var(--green);letter-spacing:-.02em}
+.stage-count i{font-style:normal}
+.stage-status{
+  font-style:normal;font-size:10px;font-weight:900;letter-spacing:.1em;color:var(--muted);
+  border:1px solid var(--line);border-radius:999px;padding:6px 11px;white-space:nowrap;
+}
+.stage-card.is-running .stage-status{color:var(--green);border-color:rgba(85,239,170,.4);background:rgba(85,239,170,.06)}
+.stage-card.is-done .stage-status{color:var(--green2);border-color:rgba(159,248,207,.25)}
+.stage-card.is-retry .stage-status{color:var(--yellow);border-color:rgba(239,199,109,.4)}
+
+.stage-body{
+  display:grid;grid-template-columns:auto minmax(0,1fr);gap:20px;align-items:center;align-content:center;
+}
+.stage-body .node-code{width:64px;height:64px;border-radius:18px;font-size:16px}
+.stage-card.is-running .stage-body .node-code{
+  border-color:rgba(85,239,170,.55);background:rgba(85,239,170,.07);
+  box-shadow:0 0 28px rgba(85,239,170,.12);
+}
+.stage-body b{display:block;font-size:24px;letter-spacing:-.035em;line-height:1.25}
+.stage-body small{display:block;margin-top:9px;color:var(--muted);font-size:13px;line-height:1.6;max-width:520px}
+/* 단계가 넘어갈 때만 재생된다. */
+.stage-body.is-entering{animation:stageEnter .34s cubic-bezier(.22,.8,.28,1)}
+@keyframes stageEnter{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+
+.stage-next{margin:0;color:var(--muted);font-size:11px;letter-spacing:.02em}
+
+.stage-rail{list-style:none;margin:0;padding:16px 0 0;border-top:1px solid var(--line);display:flex;gap:7px}
+.stage-rail li{
+  flex:1;min-width:0;display:grid;gap:7px;justify-items:center;
+  color:var(--muted);font-size:9px;font-weight:900;letter-spacing:.06em;
+}
+.stage-rail li::before{
+  content:"";display:block;width:100%;height:4px;border-radius:999px;background:#1b3027;
+  transition:background .3s ease,box-shadow .3s ease;
+}
+.stage-rail li span{opacity:.55;transition:opacity .3s ease,color .3s ease}
+.stage-rail li.done::before{background:linear-gradient(90deg,var(--green),var(--cyan))}
+.stage-rail li.done span{color:var(--green2);opacity:.9}
+.stage-rail li.retry::before{background:var(--yellow)}
+.stage-rail li.retry span{color:var(--yellow);opacity:1}
+.stage-rail li.running::before,.stage-rail li.current::before{
+  background:var(--green);box-shadow:0 0 14px rgba(85,239,170,.45);
+}
+.stage-rail li.current span{color:var(--green);opacity:1}
+
+@media(max-width:1080px){
+  .stage-card{min-height:auto;padding:22px}
+  .stage-body b{font-size:20px}
+}
+@media(max-width:720px){
+  .stage-body{grid-template-columns:1fr;gap:14px}
+  .stage-body b{font-size:18px}
+  .stage-body small{font-size:12px}
+  .stage-rail{gap:4px}
+  .stage-rail li{font-size:8px}
+}
+@media(prefers-reduced-motion:reduce){
+  .stage-body.is-entering{animation:none}
+}

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>깨움 KKAEUM</title>
-  <link rel="stylesheet" href="/static/styles.css?v=19" />
+  <link rel="stylesheet" href="/static/styles.css?v=22" />
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -204,41 +204,29 @@
           </div>
         </div>
 
+        <!-- v21: 단계별 카드 9개 대신, 한 칸 안에서 다음 단계로 넘어가는 스테퍼로 표시한다.
+             실행되는 단계 목록은 app.js의 STAGES가 단일 출처이고 레일은 거기서 생성된다. -->
         <div class="pipeline" id="pipeline">
-          <article class="pipeline-node" data-stage="profile">
-            <span class="node-code">PF</span><div><b>사용자 프로필 분석</b><small>투자기간 · 위험수용능력</small></div><em>대기</em>
-          </article>
-          <article class="pipeline-node" data-stage="rag">
-            <span class="node-code">RG</span><div><b>금융지식 검색</b><small>선택 상품 PDF 내부 근거 검색</small></div><em>대기</em>
-          </article>
-          <article class="pipeline-node wide" data-stage="product_extraction">
-            <span class="node-code">PX</span><div><b>상품정보 구조화 추출</b><small>선택한 공식 PDF에서 구성상품 · 비중 · 위험정보를 Qwen이 구조화</small></div><em>대기</em>
-          </article>
-          <article class="pipeline-node" data-stage="finance">
-            <span class="node-code">FN</span><div><b>금융 계산 엔진</b><small>목표자산 · 예상자산 · Gap</small></div><em>대기</em>
-          </article>
-          <article class="pipeline-node" data-stage="monte_carlo">
-            <span class="node-code">MC</span><div><b>몬테카를로 시뮬레이션</b><small>목표달성 확률 분포</small></div><em>대기</em>
-          </article>
-          <article class="pipeline-node" data-stage="optimizer">
-            <span class="node-code">OP</span><div><b>포트폴리오 최적화</b><small>제약 내 후보 전략 탐색</small></div><em>대기</em>
-          </article>
-          <article class="pipeline-node wide" data-stage="recommendation">
-            <span class="node-code">RA</span><div><b>맞춤 전략 생성</b><small>RAG + 계산결과를 결합한 개인화 전략</small></div><em>대기</em>
-          </article>
-          <article class="pipeline-node wide" data-stage="critic">
-            <span class="node-code">CR</span><div><b>전략 검증 에이전트</b><small>적합성 · 근거 · 숫자 · 운영유형 검증</small></div><em>대기</em>
-          </article>
-          <article class="pipeline-node wide report-node" data-stage="report">
-            <span class="node-code">RP</span><div><b>보고서 생성</b><small>검증된 결과만 최종 보고서 반영</small></div><em>대기</em>
+          <article class="stage-card" id="stageCard">
+            <div class="stage-top">
+              <span class="stage-count"><b id="stageIndex">01</b> / <i id="stageTotal">09</i></span>
+              <em class="stage-status" id="stageStatus">대기</em>
+            </div>
+
+            <div class="stage-body" id="stageBody">
+              <span class="node-code" id="stageCode">PF</span>
+              <div>
+                <b id="stageTitle">사용자 프로필 분석</b>
+                <small id="stageDesc">투자기간 · 위험수용능력</small>
+              </div>
+            </div>
+
+            <p class="stage-next" id="stageNext">다음 · 금융지식 검색</p>
+            <ol class="stage-rail" id="stageRail"></ol>
           </article>
         </div>
       </div>
 
-      <div class="terminal-card">
-        <div class="terminal-head"><span></span><span></span><span></span><b>에이전트 실행 기록</b></div>
-        <div id="traceLog" class="terminal-body"><p><i>시스템</i> 분석 흐름을 초기화했습니다.</p></div>
-      </div>
     </section>
 
     <section id="reportView" class="stage-view hidden">
@@ -354,6 +342,6 @@
   </main>
 
   <footer>깨움 KKAEUM · 당신의 AI 연금분석 비서</footer>
-  <script src="/static/app.js?v=19"></script>
+  <script src="/static/app.js?v=25"></script>
 </body>
 </html>
