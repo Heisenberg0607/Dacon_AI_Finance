@@ -519,3 +519,17 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   .compare-field,.compare-field.wide{min-width:0}
   .compare-actions button{flex:1}
 }
+
+/* v22: 전망 그래프 범례 */
+.chart-legend{display:flex;flex-wrap:wrap;gap:9px 20px;margin:11px 0 4px}
+.legend-item{display:flex;align-items:flex-start;gap:9px;min-width:0;flex:1 1 250px}
+.legend-item>i{flex:none;width:18px;height:4px;border-radius:2px;margin-top:5px}
+.legend-item>i.dash{height:0;border-top:2px dashed var(--yellow);margin-top:6px}
+.legend-item>div{min-width:0}
+.legend-item b{display:block;font-size:11px;font-weight:800;line-height:1.45;overflow-wrap:anywhere}
+.legend-item span{display:block;color:var(--muted);font-size:10px;line-height:1.5;margin-top:2px}
+
+@media print{
+  .legend-item b{color:#111}
+  .legend-item span{color:#444}
+}
