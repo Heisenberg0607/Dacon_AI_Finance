@@ -27,6 +27,8 @@ function fmtDuration(sec){
   // 서버가 실측한 초 단위 소요시간을 사람이 읽는 형태로 바꾼다. 값이 없으면 만들어내지 않는다.
   const n = Number(sec);
   if(!isFinite(n) || n < 0) return '-';
+  // 1초 미만은 소수 첫째 자리로 자르면 0.04초가 '0.0초'로 보인다. 자릿수를 늘려 실측값을 그대로 보여준다.
+  if(n < 1) return `${n.toFixed(2)}초`;
   if(n < 60) return `${n.toFixed(1)}초`;
   const m = Math.floor(n/60), s2 = n - m*60;
   return `${m}분 ${s2.toFixed(0)}초`;
@@ -57,6 +59,8 @@ async function init(){
   }
   setOperationType($('operationType').value || 'DC');
   updateAdditionalTenure();
+  setStageScope($('operationType').value || 'DC');
+  resetNodes();
 }
 
 function fillProviders(){
@@ -280,17 +284,82 @@ function ragModeKo(value){
   return '금융문서 검색';
 }
 
-function node(stage){ return document.querySelector(`[data-stage="${stage}"]`); }
-function setNode(stage, status){
-  const n=node(stage); if(!n) return; n.classList.remove('running','done','retry');
-  const e=n.querySelector('em');
-  if(status==='running'){n.classList.add('running'); e.textContent='진행';}
-  else if(status==='done'){n.classList.add('done'); e.textContent='완료';}
-  else if(status==='retry'){n.classList.add('retry'); e.textContent='재검토';}
-  else e.textContent='대기';
+// v21: 단계별 카드 9개를 한 칸짜리 스테퍼로 바꿨다.
+// 한 칸 안에서 현재 단계만 보여주고 다음 단계로 넘어가며, 하단 레일이 전체 진행 위치를 알려준다.
+// [stage, 코드, 제목, 설명] — 화면에 나오는 단계 정의의 단일 출처.
+const STAGES=[
+  ['profile','PF','사용자 프로필 분석','투자기간 · 위험수용능력'],
+  ['rag','RG','금융지식 검색','선택 상품 PDF 내부 근거 검색'],
+  ['product_extraction','PX','상품정보 구조화 추출','선택한 공식 PDF에서 구성상품 · 비중 · 위험정보를 Qwen이 구조화'],
+  ['finance','FN','금융 계산 엔진','목표자산 · 예상자산 · Gap'],
+  ['monte_carlo','MC','몬테카를로 시뮬레이션','목표달성 확률 분포'],
+  ['optimizer','OP','포트폴리오 최적화','제약 내 후보 전략 탐색'],
+  ['recommendation','RA','맞춤 전략 생성','RAG + 계산결과를 결합한 개인화 전략'],
+  ['critic','CR','전략 검증 에이전트','적합성 · 근거 · 숫자 · 운영유형 검증'],
+  ['report','RP','보고서 생성','검증된 결과만 최종 보고서 반영'],
+];
+let stageScope=STAGES.map(x=>x[0]);  // 이번 분석에서 실제로 실행되는 단계만 남긴다
+let stageState={};                   // stage -> wait | running | done | retry
+let stageFocus=null;                 // 지금 칸에 떠 있는 단계
+
+function stageMeta(stage){ return STAGES.find(x=>x[0]===stage); }
+function setStageScope(operationType){
+  // DB형은 개인 선택 상품 PDF 구조화 추출을 실행하지 않으므로 레일에서도 뺀다.
+  stageScope=STAGES.map(x=>x[0]).filter(st=>!(operationType==='DB' && st==='product_extraction'));
+  const rail=$('stageRail');
+  if(rail){
+    rail.innerHTML=stageScope.map(st=>{
+      const m=stageMeta(st);
+      return `<li data-stage="${st}" title="${esc(m[2])}"><span>${esc(m[1])}</span></li>`;
+    }).join('');
+  }
+  const total=$('stageTotal'); if(total) total.textContent=String(stageScope.length).padStart(2,'0');
 }
-function resetNodes(){ ['profile','rag','product_extraction','finance','monte_carlo','optimizer','recommendation','critic','report'].forEach(s=>setNode(s,'wait')); }
-function log(tag,msg){ const p=document.createElement('p'); p.innerHTML=`<i>${esc(tag)}</i>${esc(msg)}`; $('traceLog').appendChild(p); $('traceLog').scrollTop=$('traceLog').scrollHeight; }
+function renderStage(){
+  const rail=$('stageRail'); if(!rail) return;
+  stageScope.forEach(st=>{
+    const li=rail.querySelector(`[data-stage="${st}"]`); if(!li) return;
+    const state=stageState[st]||'wait';
+    li.className=state==='wait' ? '' : state;
+    if(st===stageFocus) li.classList.add('current');
+  });
+  const focus=stageFocus||stageScope[0];
+  const m=stageMeta(focus); if(!m) return;
+  const idx=stageScope.indexOf(focus);
+  const state=stageState[focus]||'wait';
+  $('stageIndex').textContent=String(idx+1).padStart(2,'0');
+  $('stageCode').textContent=m[1];
+  $('stageTitle').textContent=m[2];
+  $('stageDesc').textContent=m[3];
+  $('stageStatus').textContent=statusKo(state);
+  const next=stageScope[idx+1];
+  $('stageNext').textContent=next ? `다음 · ${stageMeta(next)[2]}` : '마지막 단계';
+  const card=$('stageCard');
+  card.classList.remove('is-running','is-done','is-retry');
+  if(state==='running') card.classList.add('is-running');
+  else if(state==='done') card.classList.add('is-done');
+  else if(state==='retry') card.classList.add('is-retry');
+}
+function playStageTransition(){
+  // 칸 내용이 바뀔 때만 전환 애니메이션을 다시 태운다.
+  const body=$('stageBody'); if(!body) return;
+  body.classList.remove('is-entering');
+  void body.offsetWidth;
+  body.classList.add('is-entering');
+}
+// 레일에 존재하는 단계인지 확인하는 용도. 알 수 없는 stage(planner 등)는 null.
+function node(stage){ return document.querySelector(`#stageRail [data-stage="${stage}"]`); }
+function setNode(stage, status){
+  if(!stageMeta(stage) || !stageScope.includes(stage)) return;
+  stageState[stage]=status;
+  // 진행/재검토로 들어온 단계가 칸의 주인공이 된다. 완료는 넘어가기 전까지 그대로 보여준다.
+  if((status==='running'||status==='retry') && stageFocus!==stage){
+    stageFocus=stage;
+    playStageTransition();
+  }
+  renderStage();
+}
+function resetNodes(){ stageState={}; stageFocus=stageScope[0]; renderStage(); }
 const delay = ms => new Promise(r=>setTimeout(r,ms));
 
 // v20: 2단계 대기 화면의 "예상 남은 시간" 게이지.
@@ -311,6 +380,14 @@ function setWaitProgress(ratio){
   const ring=$('waitRing'); if(ring) ring.style.strokeDashoffset=String(WAIT_RING_LENGTH*(1-r));
   const bar=$('waitBar'); if(bar) bar.style.width=`${(r*100).toFixed(1)}%`;
 }
+function waitBasisText(est){
+  // 표시된 숫자가 어디서 온 값인지 그대로 밝힌다. source와 percentile 모두 서버가 알려준다.
+  // 예상치는 백분위수라 '표본의 N%가 이 시간 안에 끝났다'가 문자 그대로 참이다.
+  const within=`${est.percentile}%가 ${fmtDuration(est.expected_seconds)} 이내 완료`;
+  if(est.source==='related') return `${est.basis_operation_type} 실측 ${est.sample_size}회 중 ${within} (이 유형 이력 없음)`;
+  if(est.source==='baseline') return `기본 측정치 ${est.sample_size}회 중 ${within}`;
+  return `최근 ${est.sample_size}회 중 ${within}`;
+}
 function renderWaitMeter(){
   const card=$('agentCoreCard'); if(!card) return;
   const elapsed=(performance.now()-waitStartedAt)/1000;
@@ -324,7 +401,7 @@ function renderWaitMeter(){
     return;
   }
   const expected=waitEstimate.expected_seconds;
-  const basis=`${elapsedText} · 최근 ${waitEstimate.sample_size}회 실측 중앙값 ${fmtDuration(expected)} 기준`;
+  const basis=`${elapsedText} · ${waitBasisText(waitEstimate)}`;
   const remaining=expected-elapsed;
   if(remaining<=0){
     // 예상치를 넘겼다. 남은 시간을 새로 지어내지 않고 초과 상태만 알린다.
@@ -368,17 +445,31 @@ function finishWaitMeter(result){
 }
 
 let progressTimer=null; let progressIndex=0;
-const pendingStages=[['profile','PF','사용자 프로필을 구조화합니다.'],['rag','RAG','선택한 상품의 공식 PDF 내부에서 근거를 검색합니다.'],['product_extraction','PX','Qwen이 선택 상품 PDF에서 구성상품과 비중을 구조화합니다.'],['finance','FIN','PDF 추출값을 Python 금융엔진에 넣어 목표자산과 예상 은퇴자산을 계산합니다.'],['monte_carlo','MC','확률 기반 은퇴자산 분포를 시뮬레이션합니다.'],['optimizer','OPT','제약조건 안에서 후보 전략을 탐색합니다.'],['recommendation','REC','개인화 추천안을 생성합니다.'],['critic','CR','추천의 적합성과 근거를 검증합니다.'],['report','RP','검증된 결과로 보고서를 생성합니다.']];
+// 서버 응답을 기다리는 동안 에이전트 카드에 띄울 단계별 안내 문구.
+// 단계 순서는 STAGES(stageScope) 하나만 따르므로 여기서는 문구만 들고 있다.
+const PENDING_MESSAGE={
+  profile:'사용자 프로필을 구조화합니다.',
+  rag:'선택한 상품의 공식 PDF 내부에서 근거를 검색합니다.',
+  product_extraction:'Qwen이 선택 상품 PDF에서 구성상품과 비중을 구조화합니다.',
+  finance:'PDF 추출값을 Python 금융엔진에 넣어 목표자산과 예상 은퇴자산을 계산합니다.',
+  monte_carlo:'확률 기반 은퇴자산 분포를 시뮬레이션합니다.',
+  optimizer:'제약조건 안에서 후보 전략을 탐색합니다.',
+  recommendation:'개인화 추천안을 생성합니다.',
+  critic:'추천의 적합성과 근거를 검증합니다.',
+  report:'검증된 결과로 보고서를 생성합니다.',
+};
 function startPendingAnimation(operationType){
   startWaitMeter(operationType);
-  resetNodes(); progressIndex=0; $('traceLog').innerHTML='<p><i>시스템</i>분석 요청을 접수했습니다.</p>';
-  const extractionNode=node('product_extraction');
-  if(extractionNode) extractionNode.classList.toggle('hidden', operationType==='DB');
-  const stages=operationType==='DB' ? pendingStages.filter(x=>x[0]!=='product_extraction') : pendingStages;
+  setStageScope(operationType);
+  resetNodes(); progressIndex=0;
+  const stages=stageScope.slice();
   const tick=()=>{
-    if(progressIndex>0) setNode(stages[progressIndex-1][0],'done');
+    if(progressIndex>0) setNode(stages[progressIndex-1],'done');
     if(progressIndex<stages.length){
-      const [s,t,m]=stages[progressIndex]; setNode(s,'running'); log(t,m); $('agentState').textContent=m; $('agentDetail').textContent='깨움 AI 에이전트의 분석 결과를 기다리는 중입니다.'; progressIndex++;
+      const s=stages[progressIndex]; setNode(s,'running');
+      $('agentState').textContent=PENDING_MESSAGE[s]||'';
+      $('agentDetail').textContent='깨움 AI 에이전트의 분석 결과를 기다리는 중입니다.';
+      progressIndex++;
     }
   };
   tick(); progressTimer=setInterval(tick,900);
@@ -397,13 +488,13 @@ $('pensionForm').addEventListener('submit', async(e)=>{
     const res=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
     if(!res.ok){ throw new Error(await res.text()); }
     const result=await res.json(); lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(result); await replayTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
-  }catch(err){ stopPendingAnimation(); log('ERR',err.message); alert('분석 중 오류가 발생했습니다. .env의 Qwen 설정 또는 서버 로그를 확인해주세요.'); $('inputView').classList.remove('hidden'); $('workflowView').classList.add('hidden'); }
+  }catch(err){ stopPendingAnimation(); console.error('분석 실패:', err); alert('분석 중 오류가 발생했습니다. .env의 Qwen 설정 또는 서버 로그를 확인해주세요.'); $('inputView').classList.remove('hidden'); $('workflowView').classList.add('hidden'); }
   finally{ btn.disabled=false; btn.querySelector('span').textContent='깨움 분석 시작'; }
 });
 
 async function replayTrace(result){
-  resetNodes(); $('traceLog').innerHTML='';
-  const extractionNode=node('product_extraction'); if(extractionNode) extractionNode.classList.toggle('hidden', result.user.operation_type==='DB');
+  setStageScope(result.user.operation_type);
+  resetNodes();
   $('modeBadge').textContent=result.mode.qwen_enabled?'Qwen 에이전트':'안전 실행 모드';
   $('workflowSubtitle').textContent=`${result.mode.qwen_enabled?'Qwen 에이전트가 도구를 선택':'안전 실행 로직 적용'} · ${ragModeKo(result.mode.rag)} · 분석 반복 ${result.mode.iterations}회`;
   for(const t of result.trace){
@@ -411,8 +502,6 @@ async function replayTrace(result){
     if(node(stage)) setNode(stage, t.status==='retry'?'retry':'running');
     $('agentState').textContent=toolKo(t.tool || stage);
     $('agentDetail').textContent=t.selected_by ? `${selectedByKo(t.selected_by)} 방식으로 이 단계를 실행했습니다.` : '실행 중입니다.';
-    const took = t.elapsed_seconds == null ? '' : ` · ${fmtDuration(t.elapsed_seconds)}`;
-    log(toolKo(t.tool||stage).slice(0,10), t.error ? `오류: ${t.error}` : `${statusKo(t.status)}${t.selected_by?` · ${selectedByKo(t.selected_by)}`:''}${took}${t.reason?` · ${t.reason}`:''}`);
     await delay(180);
     if(node(stage)) setNode(stage, t.status==='retry'?'retry':'done');
   }

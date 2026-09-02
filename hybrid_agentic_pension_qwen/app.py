@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -53,9 +55,14 @@ def catalog():
 def eta(operation_type: OperationType = 'DC'):
     """2단계 대기 화면이 쓰는 예상 소요시간.
 
-    과거 분석의 실측 total_seconds 이력만 근거로 삼는다. 이력이 없으면
-    available=False로 응답하고, 화면은 임의의 숫자 대신 비확정 상태를 표시한다.
-    Qwen 실행과 demo fallback은 소요시간이 크게 다르므로 이력도 분리해 조회한다.
+    실제로 측정된 total_seconds만 근거로 삼는다. 응답의 source가 그 근거를 밝힌다.
+
+      measured - 이 서버의 라이브 이력
+      baseline - 저장소에 커밋된 실측 baseline (새로 클론한 환경의 첫 분석)
+      related  - 같은 실행모드의 다른 운영유형 (basis_operation_type에 어떤 유형인지 담긴다)
+
+    어디에도 실측값이 없으면 available=False로 응답하고,
+    화면은 임의의 숫자 대신 비확정 상태를 표시한다.
     """
     estimate = run_times.estimate(operation_type, qwen.enabled)
     if estimate is None:
@@ -80,11 +87,17 @@ def product_extraction(user: UserPensionInput):
 
 @app.post('/api/analyze')
 def analyze(user: UserPensionInput):
+    started = time.perf_counter()
     result = workflow.run(user)
-    # 다음 사용자의 '예상 남은 시간'은 이 실측값들만 근거로 계산된다.
-    run_times.record(user.operation_type, (result.get('timing') or {}).get('total_seconds'), qwen.enabled)
     # 보고서 화면 챗봇이 같은 분석 context를 이어서 쓰도록 서버에 잠시 보관한다.
     result['analysis_id'] = analysis_store.put(user, result)
+    # 다음 사용자의 '예상 남은 시간'은 이 실측값들만 근거로 계산된다.
+    #
+    # 여기서 재는 값과 result['timing']['total_seconds']는 일부러 다르다.
+    # total_seconds는 workflow.run()만 감싼 '보고서 생성 소요시간'이라 보고서 표지에 쓰고,
+    # 대기 게이지는 화면에서 요청을 보내고 응답을 받을 때까지를 재므로 핸들러 전체를 담는다.
+    # 둘을 같게 맞추면 게이지가 항상 예상 시간을 초과한다. 불일치로 보고 되돌리지 말 것.
+    run_times.record(user.operation_type, time.perf_counter() - started, qwen.enabled)
     return result
 
 
