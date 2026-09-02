@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>깨움 KKAEUM</title>
-  <link rel="stylesheet" href="/static/styles.css?v=22" />
+  <link rel="stylesheet" href="/static/styles.css?v=27" />
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -285,6 +285,27 @@
 
         <section class="report-section">
           <div class="report-section-title"><span>03</span><h3>은퇴자산 전망 및 시뮬레이션</h3></div>
+          <!-- v21: 다른 상품으로 전망만 다시 계산해 비교한다.
+               보고서 본문은 가입 상품 기준으로 유지되므로 인쇄에서는 제외한다. -->
+          <div class="compare-bar no-print" id="compareBar">
+            <div class="compare-fields">
+              <div class="compare-field">
+                <span>사업자</span>
+                <strong class="compare-fixed" id="compareProviderLabel"></strong>
+              </div>
+              <label class="compare-field wide">
+                <span>비교할 상품</span>
+                <select id="compareProduct"></select>
+              </label>
+            </div>
+            <div class="compare-actions">
+              <button id="compareBtn" class="primary-btn compact" type="button">이 상품으로 계산</button>
+              <button id="compareResetBtn" class="secondary-btn compact hidden" type="button">가입 상품으로 되돌리기</button>
+            </div>
+          </div>
+          <p class="compare-status hidden" id="compareStatus"></p>
+          <p class="compare-note hidden" id="compareNote"></p>
+
           <div class="chart-box"><svg id="projectionChart" viewBox="0 0 980 360" aria-label="자산 성장 시뮬레이션"></svg></div>
           <p id="simulationComment" class="caption"></p>
         </section>
@@ -342,6 +363,6 @@
   </main>
 
   <footer>깨움 KKAEUM · 당신의 AI 연금분석 비서</footer>
-  <script src="/static/app.js?v=25"></script>
+  <script src="/static/app.js?v=28"></script>
 </body>
 </html>

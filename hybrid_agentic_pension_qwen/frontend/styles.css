@@ -472,3 +472,50 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 @media(prefers-reduced-motion:reduce){
   .stage-body.is-entering{animation:none}
 }
+
+/* v21: 보고서 03 섹션 - 다른 상품으로 전망 비교 */
+.compare-bar{
+  display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap;
+  border:1px solid var(--line);border-radius:14px;background:rgba(85,239,170,.03);
+  padding:14px 15px;margin-bottom:12px;
+}
+.compare-bar.hidden{display:none!important}
+.compare-fields{display:flex;gap:12px;flex:1;min-width:0;flex-wrap:wrap}
+.compare-field{display:grid;gap:6px;min-width:170px}
+.compare-field.wide{flex:1;min-width:260px}
+.compare-field>span{font-size:10px;color:var(--muted);letter-spacing:.08em;font-weight:800}
+.compare-field select{
+  width:100%;border:1px solid var(--line);border-radius:11px;background:#08130f;color:var(--text);
+  padding:10px 11px;font:inherit;font-size:13px;outline:none;min-height:42px;
+}
+.compare-field select:focus{border-color:rgba(85,239,170,.65);box-shadow:0 0 0 3px rgba(85,239,170,.06)}
+.compare-field select:disabled{opacity:.5;cursor:not-allowed}
+/* 사업자는 가입 상품 기준으로 고정 - 입력이 아니라 표시다 */
+.compare-fixed{
+  display:flex;align-items:center;min-height:42px;padding:10px 11px;
+  border:1px dashed var(--line);border-radius:11px;background:rgba(255,255,255,.02);
+  color:var(--muted);font-size:13px;font-weight:700;
+}
+.compare-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.compare-actions .primary-btn.compact,.compare-actions .secondary-btn.compact{
+  width:auto;min-height:42px;padding:10px 16px;font-size:13px;
+}
+.compare-actions .primary-btn.compact:disabled{opacity:.45;cursor:not-allowed}
+.compare-actions .secondary-btn.compact.hidden{display:none!important}
+
+.compare-status,.compare-note{margin:0 0 10px;font-size:11px;line-height:1.6}
+.compare-status{
+  color:var(--green2);border-left:3px solid var(--green);
+  background:rgba(85,239,170,.05);border-radius:0 10px 10px 0;padding:9px 12px;
+}
+.compare-note{
+  color:var(--yellow);border-left:3px solid var(--yellow);
+  background:rgba(239,199,109,.05);border-radius:0 10px 10px 0;padding:9px 12px;
+}
+.compare-status.hidden,.compare-note.hidden{display:none!important}
+
+@media(max-width:720px){
+  .compare-bar{flex-direction:column;align-items:stretch}
+  .compare-field,.compare-field.wide{min-width:0}
+  .compare-actions button{flex:1}
+}

@@ -550,13 +550,10 @@ function renderReport(r){
     $('mCurrent').textContent=fmtMoney(u.current_savings);
     $('mCurrentSmall').textContent='입력값을 실제 원화 숫자로 표시';
     $('mFutureLabel').textContent='예상 은퇴자산';
-    $('mFuture').textContent=fmtMoney(f.future_asset);
-    $('mFutureSmall').textContent=f.calculation_basis==='selected_product_pdf'?'선택 상품 PDF 기반 계산':'추출 실패 fallback 계산';
     $('mTargetLabel').textContent='목표 은퇴자산';
     $('mTarget').textContent=fmtMoney(f.target_retirement_asset);
     $('mTargetSmall').textContent='4% 인출률 계산값 · 실제 원화 숫자';
     $('mProbabilityLabel').textContent='목표달성 확률';
-    $('mProbability').textContent=fmtPct(mc.success_probability_pct,1);
     $('mProbabilitySmall').textContent='몬테카를로 시뮬레이션';
   }
 
@@ -592,13 +589,6 @@ function renderReport(r){
 
   $('simulationComment').textContent=rep.simulation_comment || '';
   $('strategyList').innerHTML=(rep.strategy||rec.actions||[]).map(x=>`<div>${esc(x)}</div>`).join('');
-  if(isDB){
-    $('allocationBars').innerHTML='<div class="db-allocation-note">DB형은 개인 자산배분 최적화 대신 예상 DB 급여와 희망 노후소득의 Gap을 분석합니다.</div>';
-    $('optimizedGoal').textContent=fmtPct(o.goal_rate_pct,1);
-  }else{
-    renderAllocation(o.recommended_allocation);
-    $('optimizedGoal').textContent=fmtPct(o.goal_rate_pct,1);
-  }
 
   $('ragModeLabel').textContent=ragModeKo(r.rag.mode);
   const ragResults=r.rag.results||[];
@@ -612,12 +602,147 @@ function renderReport(r){
   const checks=[...(critic.checks||[]),...(critic.issues||[]).map(x=>`확인 필요: ${x}`)];
   $('criticChecks').innerHTML=checks.map(x=>`<div>${esc(x)}</div>`).join('');
   $('riskNotes').innerHTML=(rep.risk_notes||[]).filter(Boolean).map(x=>`<div>${esc(x)}</div>`).join('');
-  drawChart(f.series,o.series,f.target_retirement_asset);
+  renderProjection(r);
+  setupCompare(r);
   setupChat(r);
 }
+
+// v21: 선택 상품에 따라 달라지는 부분만 모아둔다.
+// renderReport와 상품 비교 재계산이 같은 경로를 쓰도록 해서 차트와 숫자가 어긋나지 않게 한다.
+// 여기서 다루지 않는 보고서 본문(종합요약·전략·근거·검증)은 항상 가입 상품 기준으로 남는다.
+function renderProjection(r){
+  const isDB = r.user.operation_type === 'DB';
+  const f=r.finance, mc=r.monte_carlo, o=r.optimizer;
+  $('goalRate').textContent=fmtPct(f.goal_rate_pct);
+  $('mProbability').textContent=fmtPct(mc.success_probability_pct,1);
+  if(isDB){
+    $('mFuture').textContent=fmtMoney(f.estimated_db_benefit ?? f.future_asset);
+    $('mFutureSmall').textContent=`임금상승률 ${Number(f.wage_growth_rate_pct||0).toFixed(2)}% 가정`;
+    $('allocationBars').innerHTML='<div class="db-allocation-note">DB형은 개인 자산배분 최적화 대신 예상 DB 급여와 희망 노후소득의 Gap을 분석합니다.</div>';
+  }else{
+    $('mFuture').textContent=fmtMoney(f.future_asset);
+    $('mFutureSmall').textContent=f.calculation_basis==='selected_product_pdf'?'선택 상품 PDF 기반 계산':'추출 실패 fallback 계산';
+    renderAllocation(o.recommended_allocation);
+  }
+  $('optimizedGoal').textContent=fmtPct(o.goal_rate_pct,1);
+  drawChart(f.series,o.series,f.target_retirement_asset);
+}
+/* ---- v21: 다른 상품으로 전망만 다시 계산해 비교 ---- */
+// baseline은 가입 상품 기준 원본 분석. 되돌리기와 비교 기준으로 쓴다.
+let compareBaseline = null;
+let compareBusy = false;
+
+function setupCompare(r){
+  compareBaseline = r;
+  const bar=$('compareBar');
+  // DB형은 개인 선택 상품이 없어 비교 대상이 존재하지 않는다.
+  if(r.user.operation_type === 'DB'){ bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  $('compareStatus').classList.add('hidden');
+  $('compareNote').classList.add('hidden');
+  $('compareResetBtn').classList.add('hidden');
+
+  // 사업자는 가입 상품 기준으로 고정한다. 사업자를 넘나드는 비교는 사용자가 당장 실행할 수 없는
+  // 선택지라, 같은 사업자 안에서 상품만 갈아보는 쪽이 실제로 행동으로 옮길 수 있는 비교다.
+  $('compareProviderLabel').textContent = r.user.provider;
+  fillCompareProducts();
+}
+
+function fillCompareProducts(){
+  const provider = compareBaseline.user.provider;
+  // catalog.products에는 title이 겹치는 항목이 있어 그대로 채우면 같은 상품이 여러 번 뜬다.
+  // 가입 상품 자체도 뺀다. 남겨두면 기본 선택이 곧 지금 화면이라 계산 버튼이 아무것도
+  // 바꾸지 않는 것처럼 보이고, 그 자리는 '가입 상품으로 되돌리기'가 이미 맡고 있다.
+  const seen = new Set();
+  const items = (catalog.products||[]).filter(x=>{
+    if(x.provider !== provider || x.title === compareBaseline.user.product_name || seen.has(x.title)) return false;
+    seen.add(x.title);
+    return true;
+  }).sort((a,b)=>String(a.title).localeCompare(String(b.title),'ko'));
+  const sel=$('compareProduct');
+  sel.innerHTML = items.length
+    ? items.map(x=>`<option value="${esc(x.title)}">${esc(x.title)}${x.risk_type?` (${esc(x.risk_type)})`:''}</option>`).join('')
+    : '<option value="">같은 사업자에 비교할 다른 상품이 없습니다</option>';
+  sel.disabled = !items.length;
+  $('compareBtn').disabled = !items.length;
+}
+
+function compareStatusText(d){
+  const p=d.product;
+  return `비교용 시뮬레이션 · ${p.product_name} (${p.investment_type}) 기준 · 보고서 본문과 챗봇은 가입 상품 기준 그대로입니다.`;
+}
+
+async function runCompare(){
+  if(compareBusy || !compareBaseline) return;
+  const title = $('compareProduct').value;
+  if(!title) return;
+  if(!analysisId){
+    $('compareStatus').textContent='분석 결과가 만료되었습니다. 다시 분석해주세요.';
+    $('compareStatus').classList.remove('hidden');
+    return;
+  }
+  const btn=$('compareBtn'), label=btn.textContent;
+  compareBusy=true; btn.disabled=true; btn.textContent='계산 중...';
+  $('compareStatus').textContent='선택한 상품의 PDF를 구조화하고 다시 계산하는 중입니다. 처음 고르는 상품은 시간이 걸릴 수 있습니다.';
+  $('compareStatus').classList.remove('hidden');
+  try{
+    const res=await fetch('/api/reproject',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({analysis_id:analysisId, provider:compareBaseline.user.provider, product_name:title}),
+    });
+    if(res.status===404){ analysisId=null; throw new Error('분석 결과가 만료되었습니다. 다시 분석해주세요.'); }
+    if(!res.ok) throw new Error(await res.text());
+    const d=await res.json();
+    if(!d.applicable){ throw new Error(d.note || '이 분석에는 상품 비교를 적용할 수 없습니다.'); }
+
+    // 원본 user는 유지한 채 상품 관련 계산 결과만 갈아끼워 같은 렌더 경로를 태운다.
+    renderProjection({user: compareBaseline.user, finance: d.finance, monte_carlo: d.monte_carlo, optimizer: d.optimizer});
+    $('compareStatus').textContent = compareStatusText(d);
+    $('compareResetBtn').classList.remove('hidden');
+    showCompareNote(d, compareBaseline);
+  }catch(err){
+    console.error('상품 비교 재계산 실패:', err);
+    $('compareStatus').textContent = err.message || '재계산에 실패했습니다.';
+    $('compareNote').classList.add('hidden');
+  }finally{
+    compareBusy=false; btn.disabled=false; btn.textContent=label;
+  }
+}
+
+function showCompareNote(d, base){
+  // Qwen 없이 도는 최소 추출은 구성비중만 읽고 자산군을 전부 원리금보장으로 분류한다.
+  // 그래서 상품을 바꿔도 기대수익률이 같아 예상 은퇴자산과 목표달성률이 그대로다.
+  // (최적화 자산배분은 투자유형을 따르므로 이때도 바뀐다.) 이유를 밝히지 않으면 고장으로 보인다.
+  const note=$('compareNote');
+  const source=(d.product_extraction||{}).source;
+  const sameProjection = d.finance.future_asset === base.finance.future_asset
+    && d.monte_carlo.success_probability_pct === base.monte_carlo.success_probability_pct;
+  if(source !== 'qwen_pdf_extraction' && sameProjection){
+    note.textContent='API 키가 없어 상품 PDF 구조화를 최소 추출로 대체했습니다. 자산군이 구분되지 않아 예상 은퇴자산과 목표달성률은 상품을 바꿔도 같게 나오고, 최적화 자산배분만 투자유형에 따라 달라집니다.';
+    note.classList.remove('hidden');
+  }else{
+    note.classList.add('hidden');
+  }
+}
+
+function resetCompare(){
+  if(!compareBaseline) return;
+  renderProjection(compareBaseline);
+  $('compareStatus').classList.add('hidden');
+  $('compareNote').classList.add('hidden');
+  $('compareResetBtn').classList.add('hidden');
+  fillCompareProducts();
+}
+
+$('compareBtn').addEventListener('click', runCompare);
+$('compareResetBtn').addEventListener('click', resetCompare);
+
 function renderAllocation(allocation){ $('allocationBars').innerHTML=Object.entries(allocation||{}).map(([k,v])=>`<div class="allocation-row"><span>${esc(k)}</span><div class="allocation-track"><div class="allocation-fill" style="width:${Math.max(0,Math.min(100,Number(v)))}%"></div></div><strong>${fmtPct(v,1)}</strong></div>`).join(''); }
 function drawChart(current, optimized, target){
-  const svg=$('projectionChart'); const W=980,H=360,L=70,R=26,T=24,B=45,iw=W-L-R,ih=H-T-B; const all=[...current,...optimized].map(x=>Number(x.value)); const max=Math.max(target,...all)*1.1; const last=Math.max(current.at(-1).year,optimized.at(-1).year); const x=y=>L+(y/last)*iw; const y=v=>T+ih-(v/max)*ih; const pts=s=>s.map(d=>`${x(d.year).toFixed(1)},${y(d.value).toFixed(1)}`).join(' '); let html='';
+  const svg=$('projectionChart');
+  // 재계산 응답이 비어 오면 at(-1) 접근에서 터진다. 그릴 게 없으면 조용히 비운다.
+  if(!Array.isArray(current) || !Array.isArray(optimized) || !current.length || !optimized.length){ svg.innerHTML=''; return; }
+  const W=980,H=360,L=70,R=26,T=24,B=45,iw=W-L-R,ih=H-T-B; const all=[...current,...optimized].map(x=>Number(x.value)); const max=Math.max(target,...all)*1.1; const last=Math.max(current.at(-1).year,optimized.at(-1).year); const x=y=>L+(y/last)*iw; const y=v=>T+ih-(v/max)*ih; const pts=s=>s.map(d=>`${x(d.year).toFixed(1)},${y(d.value).toFixed(1)}`).join(' '); let html='';
   for(let i=0;i<=5;i++){const val=max*i/5,yy=y(val);html+=`<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="#21372e"/><text x="${L-9}" y="${yy+4}" text-anchor="end" fill="#8ea49a" font-size="10">${fmtMoney(val)}</text>`;}
   const ty=y(target); html+=`<line x1="${L}" y1="${ty}" x2="${W-R}" y2="${ty}" stroke="#efc76d" stroke-width="2" stroke-dasharray="7 7"/><text x="${W-R}" y="${Math.max(12,ty-7)}" text-anchor="end" fill="#efc76d" font-size="10">목표</text>`;
   html+=`<polyline points="${pts(current)}" fill="none" stroke="#55d7e7" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="${pts(optimized)}" fill="none" stroke="#55efaa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
