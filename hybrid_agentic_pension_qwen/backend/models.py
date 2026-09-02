@@ -88,6 +88,18 @@ class ChatTurn(BaseModel):
     content: str = Field(max_length=4000)
 
 
+class ReprojectRequest(BaseModel):
+    """보고서 화면에서 다른 상품으로 전망을 다시 계산할 때 쓰는 요청.
+
+    기준 입력값은 서버 세션에 있으므로 바꿀 상품만 보낸다.
+    투자유형은 카탈로그의 risk_type을 따르므로 클라이언트가 정하지 않는다.
+    """
+
+    analysis_id: str = Field(min_length=8, max_length=64)
+    provider: str = Field(min_length=1, max_length=120)
+    product_name: str = Field(min_length=1, max_length=300)
+
+
 class ChatRequest(BaseModel):
     """보고서 화면 챗봇 요청.
 
