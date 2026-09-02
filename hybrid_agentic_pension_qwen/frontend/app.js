@@ -421,17 +421,13 @@ async function replayTrace(result){
 }
 
 function renderTiming(timing){
-  // 서버가 실측한 값이 없으면 소요시간 영역을 감춘다. 프런트에서 임의로 추정하지 않는다.
+  // 서버가 기록한 완료 시각이 없으면 완료 시간 영역을 감춘다.
   const box = document.querySelector('.report-timing');
   if(!box) return;
-  if(!timing || timing.total_seconds == null){ box.classList.add('hidden'); return; }
+  if(!timing || !timing.finished_at){ box.classList.add('hidden'); return; }
   box.classList.remove('hidden');
-  $('reportElapsed').textContent = fmtDuration(timing.total_seconds);
-  $('reportGeneratedAt').textContent = `생성 완료 ${fmtDateTime(timing.finished_at)}`;
-  const stages = Array.isArray(timing.stages) ? timing.stages : [];
-  $('reportElapsed').parentElement.title = stages.length
-    ? stages.map(s=>`${toolKo(s.tool || s.stage)} ${fmtDuration(s.seconds)}${s.runs>1?` (${s.runs}회)`:''}`).join('\n')
-    : '';
+  $('reportGeneratedAt').textContent = fmtDateTime(timing.finished_at);
+  $('reportGeneratedAt').parentElement.title = '';
 }
 
 function renderReport(r){
