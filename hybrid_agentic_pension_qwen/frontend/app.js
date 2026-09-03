@@ -434,6 +434,11 @@ function setWaitProgress(ratio){
 function waitBasisText(est){
   // 표시된 숫자가 어디서 온 값인지 그대로 밝힌다. source와 percentile 모두 서버가 알려준다.
   // 예상치는 백분위수라 '표본의 N%가 이 시간 안에 끝났다'가 문자 그대로 참이다.
+  //
+  // fixed만은 백분위수가 아니라 미리 정해둔 한 값이라 percentile이 null로 온다.
+  // 근거로 적을 표본이 없으므로 빈 문자열을 돌려주고, 화면에는 경과 시간만 남긴다.
+  // '80%가 이내 완료' 문구를 그대로 쓰면 표본에서 나온 값이 아니라 거짓말이 된다.
+  if(est.source==='fixed') return '';
   const within=`${est.percentile}%가 ${fmtDuration(est.expected_seconds)} 이내 완료`;
   if(est.source==='related') return `${est.basis_operation_type} 실측 ${est.sample_size}회 중 ${within} (이 유형 이력 없음)`;
   if(est.source==='baseline') return `기본 측정치 ${est.sample_size}회 중 ${within}`;
@@ -452,7 +457,8 @@ function renderWaitMeter(){
     return;
   }
   const expected=waitEstimate.expected_seconds;
-  const basis=`${elapsedText} · ${waitBasisText(waitEstimate)}`;
+  const basisText=waitBasisText(waitEstimate);
+  const basis=basisText ? `${elapsedText} · ${basisText}` : elapsedText;
   const remaining=expected-elapsed;
   if(remaining<=0){
     // 예상치를 넘겼다. 남은 시간을 새로 지어내지 않고 초과 상태만 알린다.
