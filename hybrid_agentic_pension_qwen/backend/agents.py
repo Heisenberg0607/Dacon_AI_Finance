@@ -126,25 +126,52 @@ class TimedTrace(list):
     - stamp_last(): 이미 append된 마지막 entry의 소요시간을 지금 시점 기준으로 다시 기록한다.
       ('running' 상태로 먼저 append 하고 작업 후 상태를 갱신하는 단계용)
     시간은 Python이 측정하며 LLM이 만들어내지 않는다.
+
+    on_event를 주면 단계가 시작·완료될 때마다 그 entry를 그대로 통보한다.
+    /api/analyze/stream이 이 통보를 SSE로 흘려보내 화면의 단계 표시를 실제 진행에 맞춘다.
+    통보는 부수효과일 뿐이라 trace의 내용과 소요시간 측정에는 영향을 주지 않는다.
+    on_event가 던진 예외가 분석을 중단시키지 않도록 삼킨다. 진행 표시 실패가 보고서
+    생성을 망치면 안 된다.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, on_event: Any = None) -> None:
         super().__init__()
         self.started_at = datetime.now()
         self._start = time.perf_counter()
         self._mark = self._start
+        self.on_event = on_event
+
+    def _notify(self, entry: dict[str, Any]) -> None:
+        if not self.on_event:
+            return
+        try:
+            self.on_event(dict(entry))
+        except Exception:
+            pass
+
+    def begin(self, stage: str, tool: str | None = None, selected_by: str | None = None) -> None:
+        """단계를 시작했다는 신호만 보낸다. trace에는 남기지 않는다.
+
+        _fallback_run_tools처럼 '작업을 끝내고 결과를 append'하는 단계는 완료 시점에만
+        기록이 남는다. 그러면 화면은 이미 끝난 단계만 알게 되어 '지금 무엇을 하는 중인지'를
+        보여줄 수 없다. 시작 신호를 따로 보내되, 소요시간 측정 기준(mark)은 건드리지 않는다.
+        """
+        self._notify({'stage': stage, 'tool': tool, 'selected_by': selected_by, 'status': 'running'})
 
     def append(self, entry: dict[str, Any]) -> None:  # type: ignore[override]
         now = time.perf_counter()
         entry['elapsed_seconds'] = round(now - self._mark, 2)
         self._mark = now
         super().append(entry)
+        self._notify(entry)
 
     def stamp_last(self) -> None:
         now = time.perf_counter()
         if self:
             self[-1]['elapsed_seconds'] = round(now - self._mark, 2)
         self._mark = now
+        if self:
+            self._notify(self[-1])
 
     @property
     def total_seconds(self) -> float:
@@ -237,6 +264,9 @@ class HybridAgenticWorkflow:
             key = self._context_key(name)
             if key in context:
                 continue
+            # 이 단계는 작업을 끝낸 뒤에야 trace에 남는다. 화면이 '지금 무엇을 하는 중인지'를
+            # 보여주려면 시작 시점에도 신호가 필요하다.
+            trace.begin(key, name, 'fallback-orchestrator')
             result = self._execute_tool(name, args, user, context)
             context[key] = result
             trace.append({'stage': key, 'tool': name, 'status': 'done', 'selected_by': 'fallback-orchestrator'})
@@ -279,6 +309,7 @@ class HybridAgenticWorkflow:
                 except Exception:
                     args = {}
                 try:
+                    trace.begin(self._context_key(name), name, 'Qwen function calling')
                     result = self._execute_tool(name, args, user, context)
                     key = self._context_key(name)
                     if key == 'rag' and key in context and user.operation_type != 'DB':
@@ -593,8 +624,13 @@ class HybridAgenticWorkflow:
             slot['seconds'] = round(slot['seconds'], 2)
         return list(totals.values())
 
-    def run(self, user: UserPensionInput) -> dict[str, Any]:
-        trace = TimedTrace()
+    def run(self, user: UserPensionInput, on_event: Any = None) -> dict[str, Any]:
+        """on_event를 주면 단계가 시작·완료될 때마다 그 entry를 통보한다.
+
+        통보는 부수효과일 뿐이고 반환값은 on_event 유무와 무관하게 동일하다.
+        /api/analyze(기존 blocking)와 /api/analyze/stream(SSE)이 같은 코드를 쓴다.
+        """
+        trace = TimedTrace(on_event=on_event)
         context: dict[str, Any] = {}
         planner_mode = 'Qwen function calling' if self.qwen.enabled else 'demo fallback orchestrator'
 
@@ -624,9 +660,11 @@ class HybridAgenticWorkflow:
             trace.append({'stage': 'recommendation', 'tool': 'Recommendation Agent', 'status': 'retry', 'selected_by': 'Qwen' if self.qwen.enabled else 'fallback', 'reason': revision})
             recommendation = self._recommendation_agent(user, context, critique=revision)
             trace.stamp_last()
+            trace.begin('critic', 'Critic Agent', 'Qwen' if self.qwen.enabled else 'fallback')
             critic = self._critic_agent(user, context, recommendation)
             trace.append({'stage': 'critic', 'tool': 'Critic Agent', 'status': 'done' if critic.get('passed') else 'revised-with-warnings', 'selected_by': 'Qwen' if self.qwen.enabled else 'fallback'})
 
+        trace.begin('report', 'Report Generator', 'Qwen' if self.qwen.enabled else 'template')
         report = self._report_agent(user, context, recommendation, critic)
         trace.append({'stage': 'report', 'tool': 'Report Generator', 'status': 'done', 'selected_by': 'Qwen' if self.qwen.enabled else 'template'})
 
