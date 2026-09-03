@@ -40,6 +40,57 @@ function fmtDateTime(iso){
   const p2 = (x)=>String(x).padStart(2,'0');
   return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
 }
+/* ---- v23: 서버 응답 없음(Failed to fetch)을 사람이 읽을 수 있는 안내로 바꾼다 ---- */
+// fetch는 서버가 응답을 못 주면 TypeError로 거절되고, 그 message는 브라우저 원문
+// "Failed to fetch"다. 지금까지는 그 문자열이 화면에 그대로 찍혀서, 원인이 서버가 안 떠
+// 있는 것뿐인데도 계산 기능이 고장난 것처럼 보였다. 이 앱에서 그 실패는 사실상 하나뿐이라
+// (로컬 uvicorn이 꺼졌거나 재시작 중이라 연결 자체가 안 된다) 원인과 조치를 한국어로 적는다.
+//
+// HTTP 응답이 온 실패(4xx/5xx)는 서버가 살아 있다는 뜻이므로 여기로 오지 않는다.
+// 그쪽은 각 호출부가 상태코드를 보고 따로 처리한다. 둘을 뭉뚱그리면 안내가 다시 틀려진다.
+class ServerUnreachableError extends Error {
+  constructor(message){ super(message); this.name = 'ServerUnreachableError'; }
+}
+const SERVER_DOWN_MESSAGE = '서버에 연결하지 못했습니다. 분석 서버(uvicorn)가 실행 중인지 확인한 뒤 다시 시도해주세요.';
+const REQUEST_TIMEOUT_MESSAGE = '서버가 제한 시간 안에 응답하지 않아 요청을 중단했습니다. 서버 로그를 확인한 뒤 다시 시도해주세요.';
+
+// 상품 비교의 첫 계산은 상품 PDF 구조화(Qwen 호출 1회)를 포함해 수십 초가 걸릴 수 있다.
+// 그렇다고 상한이 없으면 서버가 멈췄을 때 버튼이 '계산 중...'에 갇혀 되돌릴 방법이 없다.
+const REQUEST_TIMEOUT_MS = 180000;
+
+// 서버가 응답은 했지만 실패한 경우. FastAPI는 detail에 한국어 사유를 담아 보내므로 그것을 쓰고,
+// detail이 없으면(500 트레이스백 등) 원문 대신 정해둔 안내로 대체한다. 응답 본문을 그대로
+// 화면에 찍으면 사용자에게는 읽을 수 없는 문자열이고 구현 내부만 새어 나간다.
+async function httpErrorMessage(res, fallback){
+  try{
+    const body = await res.json();
+    const detail = body && body.detail;
+    if(typeof detail === 'string' && detail.trim()) return detail;
+  }catch(_){ /* JSON이 아니면 fallback */ }
+  return `${fallback} (HTTP ${res.status})`;
+}
+
+// 화면에 그대로 보여줘도 되는, 이미 한국어로 만들어 둔 실패 사유.
+class CompareError extends Error {
+  constructor(message){ super(message); this.name = 'CompareError'; }
+}
+
+async function postJson(path, body, timeoutMs = REQUEST_TIMEOUT_MS){
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try{
+    return await fetch(path, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body), signal:controller.signal,
+    });
+  }catch(err){
+    throw new ServerUnreachableError(
+      err && err.name === 'AbortError' ? REQUEST_TIMEOUT_MESSAGE : SERVER_DOWN_MESSAGE);
+  }finally{
+    clearTimeout(timer);
+  }
+}
+
 function esc(v){ return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
 
 async function init(){
@@ -485,10 +536,18 @@ $('pensionForm').addEventListener('submit', async(e)=>{
   $('modeBadge').textContent='AI 분석 진행 중';
   startPendingAnimation(data.operation_type);
   try{
-    const res=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    const res=await postJson('/api/analyze', data);
     if(!res.ok){ throw new Error(await res.text()); }
     const result=await res.json(); lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(result); await replayTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
-  }catch(err){ stopPendingAnimation(); console.error('분석 실패:', err); alert('분석 중 오류가 발생했습니다. .env의 Qwen 설정 또는 서버 로그를 확인해주세요.'); $('inputView').classList.remove('hidden'); $('workflowView').classList.add('hidden'); }
+  }catch(err){
+    stopPendingAnimation();
+    console.error('분석 실패:', err);
+    // 서버가 아예 응답하지 않은 경우까지 'Qwen 설정을 확인하라'고 안내하면 엉뚱한 곳을 보게 된다.
+    alert(err instanceof ServerUnreachableError
+      ? err.message
+      : '분석 중 오류가 발생했습니다. .env의 Qwen 설정 또는 서버 로그를 확인해주세요.');
+    $('inputView').classList.remove('hidden'); $('workflowView').classList.add('hidden');
+  }
   finally{ btn.disabled=false; btn.querySelector('span').textContent='깨움 분석 시작'; }
 });
 
@@ -693,14 +752,12 @@ async function runCompare(){
   $('compareStatus').textContent='선택한 상품의 PDF를 구조화하고 다시 계산하는 중입니다. 처음 고르는 상품은 시간이 걸릴 수 있습니다.';
   $('compareStatus').classList.remove('hidden');
   try{
-    const res=await fetch('/api/reproject',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({analysis_id:analysisId, provider:compareBaseline.user.provider, product_name:title}),
-    });
-    if(res.status===404){ analysisId=null; throw new Error('분석 결과가 만료되었습니다. 다시 분석해주세요.'); }
-    if(!res.ok) throw new Error(await res.text());
+    const res=await postJson('/api/reproject',
+      {analysis_id:analysisId, provider:compareBaseline.user.provider, product_name:title});
+    if(res.status===404){ analysisId=null; throw new CompareError('분석 결과가 만료되었습니다. 다시 분석해주세요.'); }
+    if(!res.ok) throw new CompareError(await httpErrorMessage(res, '선택한 상품을 다시 계산하지 못했습니다.'));
     const d=await res.json();
-    if(!d.applicable){ throw new Error(d.note || '이 분석에는 상품 비교를 적용할 수 없습니다.'); }
+    if(!d.applicable){ throw new CompareError(d.note || '이 분석에는 상품 비교를 적용할 수 없습니다.'); }
 
     // 원본 user는 유지한 채 상품 관련 계산 결과만 갈아끼워 같은 렌더 경로를 태운다.
     renderProjection({user: compareBaseline.user, finance: d.finance, monte_carlo: d.monte_carlo, optimizer: d.optimizer,
@@ -710,7 +767,11 @@ async function runCompare(){
     showCompareNote(d, compareBaseline);
   }catch(err){
     console.error('상품 비교 재계산 실패:', err);
-    $('compareStatus').textContent = err.message || '재계산에 실패했습니다.';
+    // err.message는 위에서 모두 한국어 안내로 만들어 넣은 값이다. 그렇지 않은 예외(렌더 중
+    // 발생한 JS 오류 등)까지 그대로 노출하면 다시 영문 내부 문구가 화면에 찍히므로 막는다.
+    $('compareStatus').textContent = (err instanceof ServerUnreachableError || err instanceof CompareError)
+      ? err.message
+      : '선택한 상품을 다시 계산하지 못했습니다. 브라우저 콘솔과 서버 로그를 확인해주세요.';
     $('compareNote').classList.add('hidden');
   }finally{
     compareBusy=false; btn.disabled=false; btn.textContent=label;
@@ -1001,11 +1062,8 @@ async function sendChat(){
   const typing=chatAppend((()=>{const t=chatEl('div','chat-typing'); t.innerHTML='<i></i><i></i><i></i>'; return t;})());
 
   try{
-    const res=await fetch('/api/chat',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({analysis_id:analysisId, message:text, history:chatHistory.slice(-6)}),
-    });
+    const res=await postJson('/api/chat',
+      {analysis_id:analysisId, message:text, history:chatHistory.slice(-6)});
     typing.remove();
     if(res.status===404){
       analysisId=null;
@@ -1022,7 +1080,9 @@ async function sendChat(){
   }catch(err){
     console.error('챗봇 응답 실패:',err);
     typing.remove();
-    chatAppend(chatEl('div','chat-msg bot error','답변을 가져오지 못했습니다. 잠시 후 다시 시도해주세요.'));
+    // 서버가 꺼져 있으면 '잠시 후 다시 시도'는 영원히 틀린 안내다. 원인을 그대로 알린다.
+    chatAppend(chatEl('div','chat-msg bot error', err instanceof ServerUnreachableError
+      ? err.message : '답변을 가져오지 못했습니다. 잠시 후 다시 시도해주세요.'));
   }finally{
     chatBusy=false;
     $('chatSendBtn').disabled=false;
