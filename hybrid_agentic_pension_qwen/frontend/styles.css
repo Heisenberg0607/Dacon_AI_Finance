@@ -564,3 +564,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 .lookup-note a{color:var(--info);font-weight:800;text-decoration:underline;text-underline-offset:2px}
 .lookup-note a:hover{color:var(--text)}
 .lookup-note a:focus-visible{outline:2px solid var(--info);outline-offset:2px;border-radius:3px}
+
+/* v27: 검증 항목이 비었을 때의 안내. 항목 카드가 아니라 사유이므로 체크 표시를 붙이지 않는다. */
+.check-grid .check-empty{grid-column:1/-1;color:var(--muted);border-style:dashed}
+.check-grid .check-empty::before{content:none}

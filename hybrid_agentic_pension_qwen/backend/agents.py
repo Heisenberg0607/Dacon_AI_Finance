@@ -19,6 +19,41 @@ from .rag import PensionRAG
 from .tools import finance_engine_tool, monte_carlo_tool, portfolio_optimizer_tool, profile_tool
 
 
+# 코드가 _deterministic_critic_checks에서 실제로 수행하는 검증 항목의 이름표.
+#
+# 왜 상수로 빼는가: 이전에는 이 목록이 demo 분기 안에만 하드코딩돼 있었다. 그래서
+#   (1) Qwen 모드에서는 LLM이 checks를 비워 보내면 화면의 'AI 전략 검증' 칸이 통째로 비었고,
+#   (2) DB형에도 '상품 PDF 매칭' 같은, 하지도 않은 검사가 적혔다.
+# 목록을 검사 로직 옆에 두고 운영유형으로 갈라서 두 문제를 함께 막는다.
+#
+# 여기 적힌 항목은 모두 코드가 실제로 돌리는 검사다. 통과 여부와 무관하게 '무엇을 봤는지'를
+# 밝히는 용도이고, 실패한 항목은 issues로 따로 나간다.
+CRITIC_CHECKS_DC_IRP = (
+    '선택 상품 PDF 정확 매칭',
+    'PDF 구성비중 구조화 가능 여부',
+    '금융계산이 선택 상품 PDF 기준인지',
+    '문서 위험등급 근거 검증',
+    '포트폴리오 최적화 적용 여부',
+    '추천 자산배분 합계 100%',
+    '최적화 자산배분 방향 일관성',
+    '수익 보장 표현 검증',
+    '금액 단위 표기 검증',
+    'RAG 근거 확보 및 ID 유효성',
+)
+CRITIC_CHECKS_DB = (
+    'DB형을 개인 적립금·상품 구조로 표현했는지',
+    '개인 포트폴리오 최적화 미적용 여부',
+    '수익 보장 표현 검증',
+    '금액 단위 표기 검증',
+    'RAG 근거 ID 유효성',
+)
+
+
+def critic_check_labels(operation_type: str) -> list[str]:
+    """이번 분석에서 코드가 실제로 돌린 결정론적 검증 항목."""
+    return list(CRITIC_CHECKS_DB if operation_type == 'DB' else CRITIC_CHECKS_DC_IRP)
+
+
 TOOL_DEFINITIONS = [
     {
         'type': 'function',
@@ -416,11 +451,12 @@ class HybridAgenticWorkflow:
 
     def _critic_agent(self, user: UserPensionInput, context: dict, recommendation: dict) -> dict:
         deterministic_issues = self._deterministic_critic_checks(user, recommendation, context)
+        base_checks = critic_check_labels(user.operation_type)
         if not self.qwen.enabled:
             return {
                 'passed': not deterministic_issues,
                 'issues': deterministic_issues,
-                'checks': ['정확한 상품 PDF 매칭', 'PDF 구성비중 구조화', '위험등급 근거 검증', 'Python 금융계산 사용', '최적화 자산배분 일관성', 'RAG 근거 ID 검증', '보장 표현 검증'],
+                'checks': base_checks,
                 'revision_instructions': '; '.join(deterministic_issues),
             }
         payload = {
@@ -446,7 +482,12 @@ class HybridAgenticWorkflow:
         ], temperature=0.1)
         parsed = self.qwen.parse_json(resp.choices[0].message.content or '', {})
         if not parsed:
-            parsed = {'passed': not deterministic_issues, 'issues': deterministic_issues, 'checks': [], 'revision_instructions': '; '.join(deterministic_issues)}
+            parsed = {'passed': not deterministic_issues, 'issues': deterministic_issues, 'revision_instructions': '; '.join(deterministic_issues)}
+        # LLM이 checks를 비워 보내거나 아예 빼먹으면 화면의 검증 칸이 통째로 빈다. 그런데
+        # 코드가 돌린 결정론적 검사는 LLM 응답과 무관하게 실제로 실행됐으므로, 그 목록을
+        # 항상 앞에 두고 LLM이 추가한 항목만 뒤에 이어 붙인다. 중복은 순서를 지키며 제거한다.
+        llm_checks = [str(x) for x in (parsed.get('checks') or []) if str(x).strip()]
+        parsed['checks'] = list(dict.fromkeys(base_checks + llm_checks))
         if deterministic_issues:
             parsed['passed'] = False
             parsed['issues'] = list(dict.fromkeys((parsed.get('issues') or []) + deterministic_issues))

@@ -21,7 +21,7 @@ BASELINE_PATH = DATA_DIR / 'run_timings_baseline.json'
 # 지금 값은 실측이 아니라 제품 결정이다. 근거로 댈 표본이 없으므로 화면은 '실측 N회 중
 # 80%가 이내 완료' 같은 근거 문구를 아예 띄우지 않고 경과 시간만 보여준다.
 # 실제 소요시간과 얼마나 맞는지는 scripts/measure_qwen_eta.py로 확인할 수 있다.
-FIXED_ESTIMATE_SECONDS: float | None = 150.0  # 2분 30초
+FIXED_ESTIMATE_SECONDS: float | None = 180.0  # 3분
 
 # 남은 시간은 백분위수로 잡는다. 중앙값을 쓰면 정의상 과거 실행의 절반이 그 값을 넘어
 # '예상 시간 초과' 상태가 상시로 뜬다. 80분위수는 표본의 80%가 그 안에 끝났다는 뜻이라
