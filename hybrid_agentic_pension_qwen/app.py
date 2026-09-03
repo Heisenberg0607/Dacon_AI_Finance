@@ -60,8 +60,9 @@ def catalog():
 def eta(operation_type: OperationType = 'DC'):
     """2단계 대기 화면이 쓰는 예상 소요시간.
 
-    실제로 측정된 total_seconds만 근거로 삼는다. 응답의 source가 그 근거를 밝힌다.
+    fixed가 아니면 실제로 측정된 total_seconds만 근거로 삼는다. 응답의 source가 그 근거를 밝힌다.
 
+      fixed    - eta_store.FIXED_ESTIMATE_SECONDS로 정해둔 고정 예상시간 (설정돼 있으면 최우선)
       measured - 이 서버의 라이브 이력
       baseline - 저장소에 커밋된 실측 baseline (새로 클론한 환경의 첫 분석)
       related  - 같은 실행모드의 다른 운영유형 (basis_operation_type에 어떤 유형인지 담긴다)
