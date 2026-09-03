@@ -533,3 +533,17 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   .legend-item b{color:#111}
   .legend-item span{color:#444}
 }
+
+/* v23: 가입 사업자/상품 조회 안내 (통합연금포털) */
+/* 2열 폼 안에서 사업자·상품명 한 줄 바로 아래에 오도록 전체 폭을 차지한다. */
+.lookup-note{
+  grid-column:1/-1;margin:-2px 0 0;
+  border:1px dashed rgba(85,215,231,.3);border-radius:12px;
+  background:rgba(85,215,231,.045);padding:11px 13px;
+  color:var(--muted);font-size:11px;line-height:1.65;
+}
+.lookup-note b{display:block;color:var(--text);font-size:11px;font-weight:800;margin-bottom:3px}
+/* 링크는 외부로 나가는 유일한 요소라 밑줄을 남겨 눌리는 곳임을 분명히 한다. */
+.lookup-note a{color:var(--cyan);font-weight:800;text-decoration:underline;text-underline-offset:2px}
+.lookup-note a:hover{color:var(--text)}
+.lookup-note a:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;border-radius:3px}

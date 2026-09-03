@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>깨움 KKAEUM</title>
-  <link rel="stylesheet" href="/static/styles.css?v=28" />
+  <link rel="stylesheet" href="/static/styles.css?v=29" />
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -146,6 +146,15 @@
               <span>가입 상품명</span>
               <select id="productName" required><option value="">사업자를 먼저 선택하세요</option></select>
             </label>
+
+            <!-- 사업자/상품명은 이 앱이 추정할 수 없는 유일한 입력이다. 적립금·납입액과 달리
+                 대략 넣으면 분석 전체가 다른 상품 PDF 기준으로 계산되므로, 모를 때 어디서
+                 확인하는지를 입력란 바로 아래에서 알려준다. -->
+            <p class="lookup-note">
+              <b>가입한 사업자나 상품을 모르시나요?</b>
+              금융감독원 <a href="https://www.fss.or.kr/fss/lifeplan/anntyLogin/list.do?menuNo=200945" target="_blank" rel="noopener noreferrer">통합연금포털 &lsquo;내연금조회&rsquo;</a>에서
+              본인이 가입한 퇴직연금의 사업자와 상품을 확인할 수 있습니다. 본인인증 또는 로그인이 필요합니다.
+            </p>
 
             <label class="field" id="investmentTypeField">
               <span>투자 유형</span>
