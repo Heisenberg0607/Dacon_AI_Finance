@@ -515,13 +515,21 @@ function startPendingAnimation(operationType){
   resetNodes(); progressIndex=0;
   const stages=stageScope.slice();
   const tick=()=>{
-    if(progressIndex>0) setNode(stages[progressIndex-1],'done');
+    // 앞 단계만 완료로 넘긴다. 마지막 단계(보고서 생성)는 여기서 절대 done을 찍지 않는다.
+    // 이 애니메이션은 서버 응답을 기다리는 동안 도는 '추정'이라, 마지막 칸까지 완료로 바꾸면
+    // 서버가 아직 보고서를 만들고 있는데도 카드 오른쪽 위에 '완료'가 떠서 거짓말이 된다.
+    // 마지막 단계의 완료는 실제 응답이 도착한 finishTrace()만 찍는다.
+    if(progressIndex>0 && progressIndex<stages.length) setNode(stages[progressIndex-1],'done');
     if(progressIndex<stages.length){
       const s=stages[progressIndex]; setNode(s,'running');
       $('agentState').textContent=PENDING_MESSAGE[s]||'';
       $('agentDetail').textContent='깨움 AI 에이전트의 분석 결과를 기다리는 중입니다.';
       progressIndex++;
+      return;
     }
+    // 마지막 단계에 도착했다. 더 추정할 것이 없으므로 타이머를 멈추고, 무엇을 기다리는지 적는다.
+    clearInterval(progressTimer); progressTimer=null;
+    $('agentDetail').textContent='마지막 단계입니다. 보고서 생성 결과를 기다리는 중입니다.';
   };
   tick(); progressTimer=setInterval(tick,900);
 }
@@ -538,7 +546,7 @@ $('pensionForm').addEventListener('submit', async(e)=>{
   try{
     const res=await postJson('/api/analyze', data);
     if(!res.ok){ throw new Error(await res.text()); }
-    const result=await res.json(); lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(result); await replayTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
+    const result=await res.json(); lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(result); await finishTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
   }catch(err){
     stopPendingAnimation();
     console.error('분석 실패:', err);
@@ -551,19 +559,45 @@ $('pensionForm').addEventListener('submit', async(e)=>{
   finally{ btn.disabled=false; btn.querySelector('span').textContent='깨움 분석 시작'; }
 });
 
-async function replayTrace(result){
-  setStageScope(result.user.operation_type);
-  resetNodes();
+// 응답이 온 뒤 남은 단계를 마무리하는 간격. 대기 애니메이션(900ms)보다 짧게 둔다.
+// 이미 끝난 일을 확정하는 중이므로 기다리게 할 이유가 없다.
+const FINISH_STEP_MS = 120;
+
+// v24: 완료 시 레일을 처음부터 다시 걸어가지 않는다.
+//
+// 이전 구현은 resetNodes()로 진행 상황을 통째로 지운 뒤 트레이스 전체를 180ms 간격으로
+// 다시 걸어갔다. 대기 중에 이미 한 번 진행한 레일이 완료 직후 처음으로 되감겼다가 다시 도니까,
+// 서버가 같은 파이프라인을 두 번 실행하는 것처럼 보였다.
+//
+// 지금은 대기 애니메이션이 멈춘 지점에서 '이어서' 마무리한다. 이미 지나간 단계는 그대로 두고,
+// 아직 확정되지 않은 단계만 서버 트레이스의 실제 결과로 닫는다. 그래서 레일은 화면에 떠 있는
+// 동안 정확히 한 번만 흘러간다.
+//
+// Qwen 모드(수십 초)에서는 애니메이션이 이미 마지막 단계에 도착해 있어 마지막 칸만 완료로 바뀌고,
+// demo 모드(0.1초 미만)에서는 아직 첫 단계이므로 남은 단계가 여기서 한 번 흘러간다. 어느 쪽이든
+// 되감기는 없다.
+async function finishTrace(result){
   $('modeBadge').textContent=result.mode.qwen_enabled?'Qwen 에이전트':'안전 실행 모드';
   $('workflowSubtitle').textContent=`${result.mode.qwen_enabled?'Qwen 에이전트가 도구를 선택':'안전 실행 로직 적용'} · ${ragModeKo(result.mode.rag)} · 분석 반복 ${result.mode.iterations}회`;
-  for(const t of result.trace){
-    const stage=t.stage;
-    if(node(stage)) setNode(stage, t.status==='retry'?'retry':'running');
-    $('agentState').textContent=toolKo(t.tool || stage);
-    $('agentDetail').textContent=t.selected_by ? `${selectedByKo(t.selected_by)} 방식으로 이 단계를 실행했습니다.` : '실행 중입니다.';
-    await delay(180);
-    if(node(stage)) setNode(stage, t.status==='retry'?'retry':'done');
+
+  // 한 단계가 재시도로 두 번 실행되면 트레이스에 두 번 등장한다. 마지막 항목이 그 단계의
+  // 최종 상태다. 레일에 없는 stage(planner 등)는 건너뛴다.
+  const lastEntry=new Map();
+  for(const t of result.trace){ if(node(t.stage)) lastEntry.set(t.stage, t); }
+
+  for(const stage of stageScope){
+    const state=stageState[stage];
+    if(state==='done' || state==='retry') continue;  // 대기 중에 이미 확정된 단계는 다시 건드리지 않는다
+    const t=lastEntry.get(stage);
+    if(t){
+      $('agentState').textContent=toolKo(t.tool || stage);
+      $('agentDetail').textContent=t.selected_by ? `${selectedByKo(t.selected_by)} 방식으로 이 단계를 실행했습니다.` : '실행을 마쳤습니다.';
+    }
+    if(state!=='running') setNode(stage,'running');
+    await delay(FINISH_STEP_MS);
+    setNode(stage, (t && t.status==='retry') ? 'retry' : 'done');
   }
+
   const totalTook = result.timing && result.timing.total_seconds != null ? ` 총 소요시간 ${fmtDuration(result.timing.total_seconds)}.` : '';
   $('agentState').textContent='분석 완료'; $('agentDetail').textContent=`전략 검증을 거친 최종 보고서가 준비되었습니다.${totalTook}`;
 }
