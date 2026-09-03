@@ -515,10 +515,39 @@ const PENDING_MESSAGE={
   critic:'추천의 적합성과 근거를 검증합니다.',
   report:'검증된 결과로 보고서를 생성합니다.',
 };
-function startPendingAnimation(operationType){
+// v28: 단계 표시는 서버가 보내는 실제 진행 이벤트를 따른다.
+// simulate:true는 스트리밍을 쓸 수 없을 때만 쓰는 대체 경로다(아래 startSimulatedStages 주석 참고).
+function startPendingAnimation(operationType, options){
   startWaitMeter(operationType);
   setStageScope(operationType);
   resetNodes(); progressIndex=0;
+  $('agentState').textContent='분석을 시작합니다.';
+  $('agentDetail').textContent='깨움 AI 에이전트가 필요한 분석 도구를 선택하고 있습니다.';
+  if(options && options.simulate) startSimulatedStages();
+}
+
+// 서버가 보낸 단계 이벤트 하나를 레일에 반영한다.
+// 서버 status는 running / done / retry / error / revised-with-warnings가 올 수 있는데
+// 레일에 스타일이 있는 상태는 running / done / retry뿐이라 나머지는 가장 가까운 쪽으로 접는다.
+// stageScope에 없는 stage(planner, 도구 이름 등)는 setNode가 알아서 무시한다.
+function applyStageEvent(ev){
+  const stage=ev && ev.stage; if(!stage) return;
+  const status = ev.status==='running' ? 'running'
+    : (ev.status==='retry' || ev.status==='error') ? 'retry'
+    : 'done';
+  setNode(stage, status);
+  if(status==='running'){
+    $('agentState').textContent=PENDING_MESSAGE[stage] || toolKo(ev.tool || stage);
+    $('agentDetail').textContent=ev.selected_by
+      ? `${selectedByKo(ev.selected_by)} 방식으로 이 단계를 실행하는 중입니다.`
+      : '실행 중입니다.';
+  }
+}
+
+// 대체 경로: 서버 진행 이벤트를 받을 수 없을 때만 쓰는 900ms 타이머.
+// 이 표시는 서버 상태와 무관한 '추정'이라 실제 소요시간 분포를 반영하지 못한다.
+// 스트리밍이 되는 환경에서는 절대 쓰지 않는다.
+function startSimulatedStages(){
   const stages=stageScope.slice();
   const tick=()=>{
     // 앞 단계만 완료로 넘긴다. 마지막 단계(보고서 생성)는 여기서 절대 done을 찍지 않는다.
@@ -541,6 +570,66 @@ function startPendingAnimation(operationType){
 }
 function stopPendingAnimation(result){ if(progressTimer) clearInterval(progressTimer); progressTimer=null; finishWaitMeter(result); }
 
+// 서버가 분석에 실패했다고 알려온 경우. 스트리밍을 다시 시도해도 같은 결과이므로
+// 대체 경로로 넘어가지 않고 그대로 실패시킨다.
+class AnalyzeError extends Error {
+  constructor(message){ super(message); this.name='AnalyzeError'; }
+}
+// 이 브라우저/서버 조합에서 스트리밍을 쓸 수 없다는 뜻. 분석 자체의 실패가 아니므로
+// 기존 blocking 경로로 다시 시도한다.
+class StreamUnavailable extends Error {}
+
+// POST /api/analyze/stream을 읽어 단계 이벤트를 onStage로 넘기고, 최종 결과를 돌려준다.
+// EventSource는 GET만 지원해서 요청 본문을 실을 수 없으므로 fetch + ReadableStream으로 읽는다.
+async function analyzeStreaming(data, onStage){
+  const res = await postJson('/api/analyze/stream', data);
+  // 404/405 = 스트리밍을 모르는 예전 서버. 그 밖의 실패는 분석 자체의 문제다.
+  if(res.status===404 || res.status===405) throw new StreamUnavailable(`HTTP ${res.status}`);
+  if(!res.ok) throw new AnalyzeError(await httpErrorMessage(res, '분석에 실패했습니다.'));
+  if(!res.body || !res.body.getReader) throw new StreamUnavailable('ReadableStream 미지원');
+
+  const reader=res.body.getReader(), decoder=new TextDecoder();
+  let buffer='', result=null, sawEvent=false;
+  for(;;){
+    const {value, done} = await reader.read();
+    if(done) break;
+    buffer += decoder.decode(value, {stream:true});
+    // SSE 이벤트는 빈 줄로 끊긴다. 마지막 조각은 아직 덜 왔을 수 있으므로 버퍼에 남긴다.
+    let cut;
+    while((cut = buffer.indexOf('\n\n')) >= 0){
+      const chunk = buffer.slice(0, cut).trim();
+      buffer = buffer.slice(cut + 2);
+      if(!chunk.startsWith('data:')) continue;   // ': keepalive' 주석행
+      let ev; try{ ev = JSON.parse(chunk.slice(5).trim()); }catch(_){ continue; }
+      sawEvent = true;
+      if(ev.type==='stage') onStage(ev);
+      else if(ev.type==='result') result = ev.result;
+      else if(ev.type==='error') throw new AnalyzeError(ev.message || '분석에 실패했습니다.');
+    }
+  }
+  if(!result){
+    // 결과 이벤트 없이 스트림이 끊겼다. 이벤트를 하나도 못 받았다면 중간에서 버퍼링됐을
+    // 가능성이 크므로 대체 경로를 시도하고, 받다가 끊긴 경우는 진짜 실패로 본다.
+    if(sawEvent) throw new AnalyzeError('분석 결과를 받지 못한 채 연결이 끊겼습니다.');
+    throw new StreamUnavailable('결과 이벤트 없음');
+  }
+  return result;
+}
+
+async function runAnalysis(data){
+  try{
+    return await analyzeStreaming(data, applyStageEvent);
+  }catch(err){
+    if(err instanceof AnalyzeError || err instanceof ServerUnreachableError) throw err;
+    console.warn('스트리밍 분석을 쓸 수 없어 기존 방식으로 전환합니다:', err);
+  }
+  // 대체 경로: 단계 진행을 알 수 없으므로 타이머로 흉내 낸다.
+  startSimulatedStages();
+  const res = await postJson('/api/analyze', data);
+  if(!res.ok) throw new AnalyzeError(await httpErrorMessage(res, '분석에 실패했습니다.'));
+  return await res.json();
+}
+
 $('pensionForm').addEventListener('submit', async(e)=>{
   e.preventDefault();
   const data=payload();
@@ -548,16 +637,16 @@ $('pensionForm').addEventListener('submit', async(e)=>{
   const btn=$('submitBtn'); btn.disabled=true; btn.querySelector('span').textContent='AI 분석 중...';
   $('inputView').classList.add('hidden'); $('workflowView').classList.remove('hidden'); $('reportView').classList.add('hidden');
   $('modeBadge').textContent='AI 분석 진행 중';
-  startPendingAnimation(data.operation_type);
+  startPendingAnimation(data.operation_type, {simulate:false});
   try{
-    const res=await postJson('/api/analyze', data);
-    if(!res.ok){ throw new Error(await res.text()); }
-    const result=await res.json(); lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(result); await finishTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
+    const result=await runAnalysis(data);
+    lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(result); await finishTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
   }catch(err){
     stopPendingAnimation();
     console.error('분석 실패:', err);
     // 서버가 아예 응답하지 않은 경우까지 'Qwen 설정을 확인하라'고 안내하면 엉뚱한 곳을 보게 된다.
-    alert(err instanceof ServerUnreachableError
+    // AnalyzeError는 서버가 알려준 실제 사유를 담고 있으므로 그대로 보여준다.
+    alert((err instanceof ServerUnreachableError || err instanceof AnalyzeError)
       ? err.message
       : '분석 중 오류가 발생했습니다. .env의 Qwen 설정 또는 서버 로그를 확인해주세요.');
     $('inputView').classList.remove('hidden'); $('workflowView').classList.add('hidden');
