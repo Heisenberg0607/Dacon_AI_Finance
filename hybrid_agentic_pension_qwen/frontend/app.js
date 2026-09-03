@@ -845,7 +845,11 @@ function renderAllocation(allocation){ $('allocationBars').innerHTML=Object.entr
 // 선이 두 개인데 무엇을 뜻하는지 화면 어디에도 적혀 있지 않았다. 색만 다르고 설명이 없으면
 // 상품을 바꿔가며 비교해도 어느 선이 어느 상품인지 읽을 수 없어서, 범례와 툴팁 양쪽에
 // "무엇을 기준으로 계산한 선인지"를 상품명까지 붙여 적는다.
-const CHART_COLORS = {current:'#55d7e7', optimized:'#55efaa', target:'#efc76d'};
+// v25: 라이트 테마 계열색. dataviz 검증 통과(흰 배경 기준, 인접쌍 CVD ΔE 30.2 / 일반 ΔE 39.2).
+// 목표선은 계열이 아니라 기준선이라 계열색을 주지 않고 중립 회색으로 물러나게 둔다.
+// styles.css의 --series-1/--series-2/--chart-target과 같은 값이다. 한쪽만 고치지 말 것.
+const CHART_COLORS = {current:'#215ee9', optimized:'#eb6834', target:'#6b6b6b'};
+const CHART_INK = {grid:'#e7e8e8', axis:'#8a8f98', surface:'#ffffff', tooltipBg:'#ffffff', tooltipLine:'#dadadb', tooltipInk:'#1f1f1f'};
 let chartState = null;
 
 // name은 범례용 전체 이름, short는 툴팁용 짧은 이름이다. 툴팁은 커서를 따라다니며 그래프를
@@ -882,10 +886,10 @@ function drawChart(current, optimized, target, meta){
   }
   meta = meta || {};
   const W=980,H=360,L=70,R=26,T=24,B=45,iw=W-L-R,ih=H-T-B; const all=[...current,...optimized].map(x=>Number(x.value)); const max=Math.max(target,...all)*1.1; const last=Math.max(current.at(-1).year,optimized.at(-1).year); const x=y=>L+(y/last)*iw; const y=v=>T+ih-(v/max)*ih; const pts=s=>s.map(d=>`${x(d.year).toFixed(1)},${y(d.value).toFixed(1)}`).join(' '); let html='';
-  for(let i=0;i<=5;i++){const val=max*i/5,yy=y(val);html+=`<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="#21372e"/><text x="${L-9}" y="${yy+4}" text-anchor="end" fill="#8ea49a" font-size="10">${fmtMoney(val)}</text>`;}
-  const ty=y(target); html+=`<line x1="${L}" y1="${ty}" x2="${W-R}" y2="${ty}" stroke="#efc76d" stroke-width="2" stroke-dasharray="7 7"/><text x="${W-R}" y="${Math.max(12,ty-7)}" text-anchor="end" fill="#efc76d" font-size="10">목표</text>`;
-  html+=`<polyline points="${pts(current)}" fill="none" stroke="#55d7e7" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="${pts(optimized)}" fill="none" stroke="#55efaa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
-  [0,Math.round(last/2),last].forEach(t=>html+=`<text x="${x(t)}" y="${H-13}" text-anchor="middle" fill="#8ea49a" font-size="10">${t}년</text>`);
+  for(let i=0;i<=5;i++){const val=max*i/5,yy=y(val);html+=`<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="${CHART_INK.grid}"/><text x="${L-9}" y="${yy+4}" text-anchor="end" fill="${CHART_INK.axis}" font-size="10">${fmtMoney(val)}</text>`;}
+  const ty=y(target); html+=`<line x1="${L}" y1="${ty}" x2="${W-R}" y2="${ty}" stroke="${CHART_COLORS.target}" stroke-width="2" stroke-dasharray="7 7"/><text x="${W-R}" y="${Math.max(12,ty-7)}" text-anchor="end" fill="${CHART_COLORS.target}" font-size="10">목표</text>`;
+  html+=`<polyline points="${pts(current)}" fill="none" stroke="${CHART_COLORS.current}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="${pts(optimized)}" fill="none" stroke="${CHART_COLORS.optimized}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
+  [0,Math.round(last/2),last].forEach(t=>html+=`<text x="${x(t)}" y="${H-13}" text-anchor="middle" fill="${CHART_INK.axis}" font-size="10">${t}년</text>`);
   // 히트 영역이 먼저 와서 선들 뒤에 깔리고, 툴팁 레이어는 그 위에 얹되 이벤트를 가로채지 않는다.
   html+=`<rect id="chartHit" x="${L}" y="${T}" width="${iw}" height="${ih}" fill="transparent" style="cursor:crosshair"/>`;
   html+=`<g id="chartHover" style="pointer-events:none;display:none"></g>`;
@@ -937,18 +941,18 @@ function showChartHover(year){
   const bx = cx + 14 + bw <= st.L + st.iw ? cx + 14 : cx - 14 - bw;
   const by = Math.min(Math.max(st.y(rows[0].value) - bh/2, st.T + 2), st.T + st.ih - bh - 2);
 
-  let h=`<line x1="${cx}" y1="${st.T}" x2="${cx}" y2="${st.T+st.ih}" stroke="#8ea49a" stroke-width="1" stroke-dasharray="4 4"/>`;
-  rows.forEach(r=>{ h+=`<circle cx="${cx}" cy="${st.y(r.value)}" r="5" fill="#07110e" stroke="${r.color}" stroke-width="3"/>`; });
-  h+=`<circle cx="${cx}" cy="${st.y(st.target)}" r="5" fill="#07110e" stroke="${CHART_COLORS.target}" stroke-width="3"/>`;
-  h+=`<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="10" fill="#0b1c16" stroke="#2b4a3d"/>`;
-  h+=`<text x="${(bx+PAD).toFixed(1)}" y="${(by+PAD+FS-1).toFixed(1)}" fill="#8ea49a" font-size="${FS}" font-weight="700">${esc(title)}</text>`;
+  let h=`<line x1="${cx}" y1="${st.T}" x2="${cx}" y2="${st.T+st.ih}" stroke="${CHART_INK.axis}" stroke-width="1" stroke-dasharray="4 4"/>`;
+  rows.forEach(r=>{ h+=`<circle cx="${cx}" cy="${st.y(r.value)}" r="5" fill="${CHART_INK.surface}" stroke="${r.color}" stroke-width="3"/>`; });
+  h+=`<circle cx="${cx}" cy="${st.y(st.target)}" r="5" fill="${CHART_INK.surface}" stroke="${CHART_COLORS.target}" stroke-width="3"/>`;
+  h+=`<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="10" fill="${CHART_INK.tooltipBg}" stroke="${CHART_INK.tooltipLine}" stroke-width="1"/>`;
+  h+=`<text x="${(bx+PAD).toFixed(1)}" y="${(by+PAD+FS-1).toFixed(1)}" fill="${CHART_INK.axis}" font-size="${FS}" font-weight="700">${esc(title)}</text>`;
   lines.forEach((l,i)=>{
     const ly=by+PAD+FS+4+LH*i+FS-2;
     // 목표선은 그래프에서 파선이므로 툴팁 표식도 파선으로 맞춘다.
     h+= l.dash
       ? `<line x1="${(bx+PAD).toFixed(1)}" y1="${(ly-3).toFixed(1)}" x2="${(bx+PAD+9).toFixed(1)}" y2="${(ly-3).toFixed(1)}" stroke="${l.color}" stroke-width="2" stroke-dasharray="3 2"/>`
       : `<rect x="${(bx+PAD).toFixed(1)}" y="${(ly-FS+2).toFixed(1)}" width="8" height="8" rx="2" fill="${l.color}"/>`;
-    h+=`<text x="${(bx+PAD+14).toFixed(1)}" y="${ly.toFixed(1)}" fill="#e8f3ee" font-size="${FS}">${esc(l.text)}</text>`;
+    h+=`<text x="${(bx+PAD+14).toFixed(1)}" y="${ly.toFixed(1)}" fill="${CHART_INK.tooltipInk}" font-size="${FS}">${esc(l.text)}</text>`;
   });
   g.innerHTML=h;
   g.setAttribute('style','pointer-events:none');
