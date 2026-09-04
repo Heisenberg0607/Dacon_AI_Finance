@@ -40,6 +40,57 @@ function fmtDateTime(iso){
   const p2 = (x)=>String(x).padStart(2,'0');
   return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
 }
+/* ---- v23: 서버 응답 없음(Failed to fetch)을 사람이 읽을 수 있는 안내로 바꾼다 ---- */
+// fetch는 서버가 응답을 못 주면 TypeError로 거절되고, 그 message는 브라우저 원문
+// "Failed to fetch"다. 지금까지는 그 문자열이 화면에 그대로 찍혀서, 원인이 서버가 안 떠
+// 있는 것뿐인데도 계산 기능이 고장난 것처럼 보였다. 이 앱에서 그 실패는 사실상 하나뿐이라
+// (로컬 uvicorn이 꺼졌거나 재시작 중이라 연결 자체가 안 된다) 원인과 조치를 한국어로 적는다.
+//
+// HTTP 응답이 온 실패(4xx/5xx)는 서버가 살아 있다는 뜻이므로 여기로 오지 않는다.
+// 그쪽은 각 호출부가 상태코드를 보고 따로 처리한다. 둘을 뭉뚱그리면 안내가 다시 틀려진다.
+class ServerUnreachableError extends Error {
+  constructor(message){ super(message); this.name = 'ServerUnreachableError'; }
+}
+const SERVER_DOWN_MESSAGE = '서버에 연결하지 못했습니다. 분석 서버(uvicorn)가 실행 중인지 확인한 뒤 다시 시도해주세요.';
+const REQUEST_TIMEOUT_MESSAGE = '서버가 제한 시간 안에 응답하지 않아 요청을 중단했습니다. 서버 로그를 확인한 뒤 다시 시도해주세요.';
+
+// 상품 비교의 첫 계산은 상품 PDF 구조화(Qwen 호출 1회)를 포함해 수십 초가 걸릴 수 있다.
+// 그렇다고 상한이 없으면 서버가 멈췄을 때 버튼이 '계산 중...'에 갇혀 되돌릴 방법이 없다.
+const REQUEST_TIMEOUT_MS = 180000;
+
+// 서버가 응답은 했지만 실패한 경우. FastAPI는 detail에 한국어 사유를 담아 보내므로 그것을 쓰고,
+// detail이 없으면(500 트레이스백 등) 원문 대신 정해둔 안내로 대체한다. 응답 본문을 그대로
+// 화면에 찍으면 사용자에게는 읽을 수 없는 문자열이고 구현 내부만 새어 나간다.
+async function httpErrorMessage(res, fallback){
+  try{
+    const body = await res.json();
+    const detail = body && body.detail;
+    if(typeof detail === 'string' && detail.trim()) return detail;
+  }catch(_){ /* JSON이 아니면 fallback */ }
+  return `${fallback} (HTTP ${res.status})`;
+}
+
+// 화면에 그대로 보여줘도 되는, 이미 한국어로 만들어 둔 실패 사유.
+class CompareError extends Error {
+  constructor(message){ super(message); this.name = 'CompareError'; }
+}
+
+async function postJson(path, body, timeoutMs = REQUEST_TIMEOUT_MS){
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try{
+    return await fetch(path, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body), signal:controller.signal,
+    });
+  }catch(err){
+    throw new ServerUnreachableError(
+      err && err.name === 'AbortError' ? REQUEST_TIMEOUT_MESSAGE : SERVER_DOWN_MESSAGE);
+  }finally{
+    clearTimeout(timer);
+  }
+}
+
 function esc(v){ return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
 
 async function init(){
@@ -390,6 +441,11 @@ function setWaitProgress(ratio){
 function waitBasisText(est){
   // 표시된 숫자가 어디서 온 값인지 그대로 밝힌다. source와 percentile 모두 서버가 알려준다.
   // 예상치는 백분위수라 '표본의 N%가 이 시간 안에 끝났다'가 문자 그대로 참이다.
+  //
+  // fixed만은 백분위수가 아니라 미리 정해둔 한 값이라 percentile이 null로 온다.
+  // 근거로 적을 표본이 없으므로 빈 문자열을 돌려주고, 화면에는 경과 시간만 남긴다.
+  // '80%가 이내 완료' 문구를 그대로 쓰면 표본에서 나온 값이 아니라 거짓말이 된다.
+  if(est.source==='fixed') return '';
   const within=`${est.percentile}%가 ${fmtDuration(est.expected_seconds)} 이내 완료`;
   if(est.source==='related') return `${est.basis_operation_type} 실측 ${est.sample_size}회 중 ${within} (이 유형 이력 없음)`;
   if(est.source==='baseline') return `기본 측정치 ${est.sample_size}회 중 ${within}`;
@@ -408,7 +464,8 @@ function renderWaitMeter(){
     return;
   }
   const expected=waitEstimate.expected_seconds;
-  const basis=`${elapsedText} · ${waitBasisText(waitEstimate)}`;
+  const basisText=waitBasisText(waitEstimate);
+  const basis=basisText ? `${elapsedText} · ${basisText}` : elapsedText;
   const remaining=expected-elapsed;
   if(remaining<=0){
     // 예상치를 넘겼다. 남은 시간을 새로 지어내지 않고 초과 상태만 알린다.
@@ -465,23 +522,120 @@ const PENDING_MESSAGE={
   critic:'추천의 적합성과 근거를 검증합니다.',
   report:'검증된 결과로 보고서를 생성합니다.',
 };
-function startPendingAnimation(operationType){
+// v28: 단계 표시는 서버가 보내는 실제 진행 이벤트를 따른다.
+// simulate:true는 스트리밍을 쓸 수 없을 때만 쓰는 대체 경로다(아래 startSimulatedStages 주석 참고).
+function startPendingAnimation(operationType, options){
   startWaitMeter(operationType);
   setStageScope(operationType);
   resetNodes(); progressIndex=0;
+  $('agentState').textContent='분석을 시작합니다.';
+  $('agentDetail').textContent='깨움 AI 에이전트가 필요한 분석 도구를 선택하고 있습니다.';
+  if(options && options.simulate) startSimulatedStages();
+}
+
+// 서버가 보낸 단계 이벤트 하나를 레일에 반영한다.
+// 서버 status는 running / done / retry / error / revised-with-warnings가 올 수 있는데
+// 레일에 스타일이 있는 상태는 running / done / retry뿐이라 나머지는 가장 가까운 쪽으로 접는다.
+// stageScope에 없는 stage(planner, 도구 이름 등)는 setNode가 알아서 무시한다.
+function applyStageEvent(ev){
+  const stage=ev && ev.stage; if(!stage) return;
+  const status = ev.status==='running' ? 'running'
+    : (ev.status==='retry' || ev.status==='error') ? 'retry'
+    : 'done';
+  setNode(stage, status);
+  if(status==='running'){
+    $('agentState').textContent=PENDING_MESSAGE[stage] || toolKo(ev.tool || stage);
+    $('agentDetail').textContent=ev.selected_by
+      ? `${selectedByKo(ev.selected_by)} 방식으로 이 단계를 실행하는 중입니다.`
+      : '실행 중입니다.';
+  }
+}
+
+// 대체 경로: 서버 진행 이벤트를 받을 수 없을 때만 쓰는 900ms 타이머.
+// 이 표시는 서버 상태와 무관한 '추정'이라 실제 소요시간 분포를 반영하지 못한다.
+// 스트리밍이 되는 환경에서는 절대 쓰지 않는다.
+function startSimulatedStages(){
   const stages=stageScope.slice();
   const tick=()=>{
-    if(progressIndex>0) setNode(stages[progressIndex-1],'done');
+    // 앞 단계만 완료로 넘긴다. 마지막 단계(보고서 생성)는 여기서 절대 done을 찍지 않는다.
+    // 이 애니메이션은 서버 응답을 기다리는 동안 도는 '추정'이라, 마지막 칸까지 완료로 바꾸면
+    // 서버가 아직 보고서를 만들고 있는데도 카드 오른쪽 위에 '완료'가 떠서 거짓말이 된다.
+    // 마지막 단계의 완료는 실제 응답이 도착한 finishTrace()만 찍는다.
+    if(progressIndex>0 && progressIndex<stages.length) setNode(stages[progressIndex-1],'done');
     if(progressIndex<stages.length){
       const s=stages[progressIndex]; setNode(s,'running');
       $('agentState').textContent=PENDING_MESSAGE[s]||'';
       $('agentDetail').textContent='깨움 AI 에이전트의 분석 결과를 기다리는 중입니다.';
       progressIndex++;
+      return;
     }
+    // 마지막 단계에 도착했다. 더 추정할 것이 없으므로 타이머를 멈추고, 무엇을 기다리는지 적는다.
+    clearInterval(progressTimer); progressTimer=null;
+    $('agentDetail').textContent='마지막 단계입니다. 보고서 생성 결과를 기다리는 중입니다.';
   };
   tick(); progressTimer=setInterval(tick,900);
 }
 function stopPendingAnimation(result){ if(progressTimer) clearInterval(progressTimer); progressTimer=null; finishWaitMeter(result); }
+
+// 서버가 분석에 실패했다고 알려온 경우. 스트리밍을 다시 시도해도 같은 결과이므로
+// 대체 경로로 넘어가지 않고 그대로 실패시킨다.
+class AnalyzeError extends Error {
+  constructor(message){ super(message); this.name='AnalyzeError'; }
+}
+// 이 브라우저/서버 조합에서 스트리밍을 쓸 수 없다는 뜻. 분석 자체의 실패가 아니므로
+// 기존 blocking 경로로 다시 시도한다.
+class StreamUnavailable extends Error {}
+
+// POST /api/analyze/stream을 읽어 단계 이벤트를 onStage로 넘기고, 최종 결과를 돌려준다.
+// EventSource는 GET만 지원해서 요청 본문을 실을 수 없으므로 fetch + ReadableStream으로 읽는다.
+async function analyzeStreaming(data, onStage){
+  const res = await postJson('/api/analyze/stream', data);
+  // 404/405 = 스트리밍을 모르는 예전 서버. 그 밖의 실패는 분석 자체의 문제다.
+  if(res.status===404 || res.status===405) throw new StreamUnavailable(`HTTP ${res.status}`);
+  if(!res.ok) throw new AnalyzeError(await httpErrorMessage(res, '분석에 실패했습니다.'));
+  if(!res.body || !res.body.getReader) throw new StreamUnavailable('ReadableStream 미지원');
+
+  const reader=res.body.getReader(), decoder=new TextDecoder();
+  let buffer='', result=null, sawEvent=false;
+  for(;;){
+    const {value, done} = await reader.read();
+    if(done) break;
+    buffer += decoder.decode(value, {stream:true});
+    // SSE 이벤트는 빈 줄로 끊긴다. 마지막 조각은 아직 덜 왔을 수 있으므로 버퍼에 남긴다.
+    let cut;
+    while((cut = buffer.indexOf('\n\n')) >= 0){
+      const chunk = buffer.slice(0, cut).trim();
+      buffer = buffer.slice(cut + 2);
+      if(!chunk.startsWith('data:')) continue;   // ': keepalive' 주석행
+      let ev; try{ ev = JSON.parse(chunk.slice(5).trim()); }catch(_){ continue; }
+      sawEvent = true;
+      if(ev.type==='stage') onStage(ev);
+      else if(ev.type==='result') result = ev.result;
+      else if(ev.type==='error') throw new AnalyzeError(ev.message || '분석에 실패했습니다.');
+    }
+  }
+  if(!result){
+    // 결과 이벤트 없이 스트림이 끊겼다. 이벤트를 하나도 못 받았다면 중간에서 버퍼링됐을
+    // 가능성이 크므로 대체 경로를 시도하고, 받다가 끊긴 경우는 진짜 실패로 본다.
+    if(sawEvent) throw new AnalyzeError('분석 결과를 받지 못한 채 연결이 끊겼습니다.');
+    throw new StreamUnavailable('결과 이벤트 없음');
+  }
+  return result;
+}
+
+async function runAnalysis(data){
+  try{
+    return await analyzeStreaming(data, applyStageEvent);
+  }catch(err){
+    if(err instanceof AnalyzeError || err instanceof ServerUnreachableError) throw err;
+    console.warn('스트리밍 분석을 쓸 수 없어 기존 방식으로 전환합니다:', err);
+  }
+  // 대체 경로: 단계 진행을 알 수 없으므로 타이머로 흉내 낸다.
+  startSimulatedStages();
+  const res = await postJson('/api/analyze', data);
+  if(!res.ok) throw new AnalyzeError(await httpErrorMessage(res, '분석에 실패했습니다.'));
+  return await res.json();
+}
 
 $('pensionForm').addEventListener('submit', async(e)=>{
   e.preventDefault();
@@ -490,28 +644,62 @@ $('pensionForm').addEventListener('submit', async(e)=>{
   const btn=$('submitBtn'); btn.disabled=true; btn.querySelector('span').textContent='AI 분석 중...';
   $('inputView').classList.add('hidden'); $('workflowView').classList.remove('hidden'); $('reportView').classList.add('hidden');
   $('modeBadge').textContent='AI 분석 진행 중';
-  startPendingAnimation(data.operation_type);
+  startPendingAnimation(data.operation_type, {simulate:false});
   try{
-    const res=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-    if(!res.ok){ throw new Error(await res.text()); }
-    const result=await res.json(); lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(result); await replayTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
-  }catch(err){ stopPendingAnimation(); console.error('분석 실패:', err); alert('분석 중 오류가 발생했습니다. .env의 Qwen 설정 또는 서버 로그를 확인해주세요.'); $('inputView').classList.remove('hidden'); $('workflowView').classList.add('hidden'); }
+    const result=await runAnalysis(data);
+    lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(result); await finishTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
+  }catch(err){
+    stopPendingAnimation();
+    console.error('분석 실패:', err);
+    // 서버가 아예 응답하지 않은 경우까지 'Qwen 설정을 확인하라'고 안내하면 엉뚱한 곳을 보게 된다.
+    // AnalyzeError는 서버가 알려준 실제 사유를 담고 있으므로 그대로 보여준다.
+    alert((err instanceof ServerUnreachableError || err instanceof AnalyzeError)
+      ? err.message
+      : '분석 중 오류가 발생했습니다. .env의 Qwen 설정 또는 서버 로그를 확인해주세요.');
+    $('inputView').classList.remove('hidden'); $('workflowView').classList.add('hidden');
+  }
   finally{ btn.disabled=false; btn.querySelector('span').textContent='깨움 분석 시작'; }
 });
 
-async function replayTrace(result){
-  setStageScope(result.user.operation_type);
-  resetNodes();
+// 응답이 온 뒤 남은 단계를 마무리하는 간격. 대기 애니메이션(900ms)보다 짧게 둔다.
+// 이미 끝난 일을 확정하는 중이므로 기다리게 할 이유가 없다.
+const FINISH_STEP_MS = 120;
+
+// v24: 완료 시 레일을 처음부터 다시 걸어가지 않는다.
+//
+// 이전 구현은 resetNodes()로 진행 상황을 통째로 지운 뒤 트레이스 전체를 180ms 간격으로
+// 다시 걸어갔다. 대기 중에 이미 한 번 진행한 레일이 완료 직후 처음으로 되감겼다가 다시 도니까,
+// 서버가 같은 파이프라인을 두 번 실행하는 것처럼 보였다.
+//
+// 지금은 대기 애니메이션이 멈춘 지점에서 '이어서' 마무리한다. 이미 지나간 단계는 그대로 두고,
+// 아직 확정되지 않은 단계만 서버 트레이스의 실제 결과로 닫는다. 그래서 레일은 화면에 떠 있는
+// 동안 정확히 한 번만 흘러간다.
+//
+// Qwen 모드(수십 초)에서는 애니메이션이 이미 마지막 단계에 도착해 있어 마지막 칸만 완료로 바뀌고,
+// demo 모드(0.1초 미만)에서는 아직 첫 단계이므로 남은 단계가 여기서 한 번 흘러간다. 어느 쪽이든
+// 되감기는 없다.
+async function finishTrace(result){
   $('modeBadge').textContent=result.mode.qwen_enabled?'Qwen 에이전트':'안전 실행 모드';
   $('workflowSubtitle').textContent=`${result.mode.qwen_enabled?'Qwen 에이전트가 도구를 선택':'안전 실행 로직 적용'} · ${ragModeKo(result.mode.rag)} · 분석 반복 ${result.mode.iterations}회`;
-  for(const t of result.trace){
-    const stage=t.stage;
-    if(node(stage)) setNode(stage, t.status==='retry'?'retry':'running');
-    $('agentState').textContent=toolKo(t.tool || stage);
-    $('agentDetail').textContent=t.selected_by ? `${selectedByKo(t.selected_by)} 방식으로 이 단계를 실행했습니다.` : '실행 중입니다.';
-    await delay(180);
-    if(node(stage)) setNode(stage, t.status==='retry'?'retry':'done');
+
+  // 한 단계가 재시도로 두 번 실행되면 트레이스에 두 번 등장한다. 마지막 항목이 그 단계의
+  // 최종 상태다. 레일에 없는 stage(planner 등)는 건너뛴다.
+  const lastEntry=new Map();
+  for(const t of result.trace){ if(node(t.stage)) lastEntry.set(t.stage, t); }
+
+  for(const stage of stageScope){
+    const state=stageState[stage];
+    if(state==='done' || state==='retry') continue;  // 대기 중에 이미 확정된 단계는 다시 건드리지 않는다
+    const t=lastEntry.get(stage);
+    if(t){
+      $('agentState').textContent=toolKo(t.tool || stage);
+      $('agentDetail').textContent=t.selected_by ? `${selectedByKo(t.selected_by)} 방식으로 이 단계를 실행했습니다.` : '실행을 마쳤습니다.';
+    }
+    if(state!=='running') setNode(stage,'running');
+    await delay(FINISH_STEP_MS);
+    setNode(stage, (t && t.status==='retry') ? 'retry' : 'done');
   }
+
   const totalTook = result.timing && result.timing.total_seconds != null ? ` 총 소요시간 ${fmtDuration(result.timing.total_seconds)}.` : '';
   $('agentState').textContent='분석 완료'; $('agentDetail').textContent=`전략 검증을 거친 최종 보고서가 준비되었습니다.${totalTook}`;
 }
@@ -524,6 +712,18 @@ function renderTiming(timing){
   box.classList.remove('hidden');
   $('reportGeneratedAt').textContent = fmtDateTime(timing.finished_at);
   $('reportGeneratedAt').parentElement.title = '';
+}
+
+// v31: 분석 근거가 된 상품설명서 원문을 그대로 받아볼 수 있게 한다.
+// 서버가 Content-Disposition: attachment로 내려주므로 평범한 링크면 충분하다.
+// fileId가 없으면(DB형이거나 원문을 못 찾은 경우) 버튼 자체를 숨긴다. 눌러야 없다는 걸
+// 알게 되는 버튼보다 없는 편이 낫다.
+function setSourcePdfLink(fileId, filename){
+  const btn=$('sourcePdfBtn');
+  if(!fileId){ btn.classList.add('hidden'); btn.removeAttribute('href'); return; }
+  btn.href=`/api/source-document?file_id=${encodeURIComponent(fileId)}`;
+  $('sourcePdfName').textContent=filename || '';
+  btn.classList.remove('hidden');
 }
 
 function renderReport(r){
@@ -582,28 +782,24 @@ function renderReport(r){
   if(isDB){
     $('currentProduct').textContent='DB 급여 분석';
     $('productAnalysis').textContent=`개인 운용상품 대신 현재 연소득, 근속연수, 임금상승률을 이용해 예상 DB 퇴직급여를 계산했습니다. ${f.calculation_note||''}`;
+    // DB형은 개인 선택 상품이 없어 내려받을 원문도 없다.
+    setSourcePdfLink(null, null);
   }else{
     $('currentProduct').textContent=u.product_name || '-';
     const ext=r.product_extraction||{};
     const alloc=(ext.asset_allocation||[]).map(x=>`${x.component_name} ${Number(x.weight_pct||0).toFixed(1).replace('.0','')}%`).join(' · ');
     const extractionLine=ext.source_filename ? `\n\nPDF 구조화: ${ext.source_filename}${alloc?` / ${alloc}`:''}` : '';
     $('productAnalysis').textContent=(rep.product_analysis || rec.product_analysis || '') + extractionLine;
+    setSourcePdfLink(ext.source_document_available ? ext.source_file_id : null, ext.source_filename);
   }
 
   $('simulationComment').textContent=rep.simulation_comment || '';
   $('strategyList').innerHTML=(rep.strategy||rec.actions||[]).map(x=>`<div>${esc(x)}</div>`).join('');
 
-  $('ragModeLabel').textContent=ragModeKo(r.rag.mode);
-  const ragResults=r.rag.results||[];
-  $('evidenceGrid').innerHTML=ragResults.length
-    ? ragResults.map(e=>`<article class="evidence-card"><div class="e-head"><b>${esc(e.evidence_id)} · ${esc(e.provider)}</b><em>p.${esc(e.page)}</em></div><h4>${esc(e.title)}</h4><p>${esc(e.snippet)}</p></article>`).join('')
-    : '<div class="db-allocation-note">DB형 개인 분석에는 현재 디폴트옵션 상품 PDF RAG를 적용하지 않습니다.</div>';
-
-  const critic=r.critic||{};
-  $('criticStatus').textContent=critic.passed?'검증 완료':'수정 반영 / 주의';
-  $('criticStatus').className=`critic-pass ${critic.passed?'':'warn'}`;
-  const checks=[...(critic.checks||[]),...(critic.issues||[]).map(x=>`확인 필요: ${x}`)];
-  $('criticChecks').innerHTML=checks.map(x=>`<div>${esc(x)}</div>`).join('');
+  // v30: '금융지식 근거'와 'AI 전략 검증' 섹션을 보고서 화면에서 뺐다.
+  // 서버는 둘 다 계속 만든다. RAG 근거는 챗봇이 근거 칩으로 쓰고(setupChat),
+  // Critic은 보고서 문장을 검증·재생성하는 파이프라인 단계라 화면 표시와 무관하게 필요하다.
+  // 화면에서 지웠다고 백엔드를 지우면 검증 자체가 사라진다.
   $('riskNotes').innerHTML=(rep.risk_notes||[]).filter(Boolean).map(x=>`<div>${esc(x)}</div>`).join('');
   renderProjection(r);
   setupCompare(r);
@@ -696,14 +892,12 @@ async function runCompare(){
   $('compareStatus').textContent='선택한 상품의 PDF를 구조화하고 다시 계산하는 중입니다. 처음 고르는 상품은 시간이 걸릴 수 있습니다.';
   $('compareStatus').classList.remove('hidden');
   try{
-    const res=await fetch('/api/reproject',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({analysis_id:analysisId, provider:compareBaseline.user.provider, product_name:title}),
-    });
-    if(res.status===404){ analysisId=null; throw new Error('분석 결과가 만료되었습니다. 다시 분석해주세요.'); }
-    if(!res.ok) throw new Error(await res.text());
+    const res=await postJson('/api/reproject',
+      {analysis_id:analysisId, provider:compareBaseline.user.provider, product_name:title});
+    if(res.status===404){ analysisId=null; throw new CompareError('분석 결과가 만료되었습니다. 다시 분석해주세요.'); }
+    if(!res.ok) throw new CompareError(await httpErrorMessage(res, '선택한 상품을 다시 계산하지 못했습니다.'));
     const d=await res.json();
-    if(!d.applicable){ throw new Error(d.note || '이 분석에는 상품 비교를 적용할 수 없습니다.'); }
+    if(!d.applicable){ throw new CompareError(d.note || '이 분석에는 상품 비교를 적용할 수 없습니다.'); }
 
     // 원본 user는 유지한 채 상품 관련 계산 결과만 갈아끼워 같은 렌더 경로를 태운다.
     renderProjection({user: compareBaseline.user, finance: d.finance, monte_carlo: d.monte_carlo, optimizer: d.optimizer,
@@ -713,7 +907,11 @@ async function runCompare(){
     showCompareNote(d, compareBaseline);
   }catch(err){
     console.error('상품 비교 재계산 실패:', err);
-    $('compareStatus').textContent = err.message || '재계산에 실패했습니다.';
+    // err.message는 위에서 모두 한국어 안내로 만들어 넣은 값이다. 그렇지 않은 예외(렌더 중
+    // 발생한 JS 오류 등)까지 그대로 노출하면 다시 영문 내부 문구가 화면에 찍히므로 막는다.
+    $('compareStatus').textContent = (err instanceof ServerUnreachableError || err instanceof CompareError)
+      ? err.message
+      : '선택한 상품을 다시 계산하지 못했습니다. 브라우저 콘솔과 서버 로그를 확인해주세요.';
     $('compareNote').classList.add('hidden');
   }finally{
     compareBusy=false; btn.disabled=false; btn.textContent=label;
@@ -753,7 +951,11 @@ function renderAllocation(allocation){ $('allocationBars').innerHTML=Object.entr
 // 선이 두 개인데 무엇을 뜻하는지 화면 어디에도 적혀 있지 않았다. 색만 다르고 설명이 없으면
 // 상품을 바꿔가며 비교해도 어느 선이 어느 상품인지 읽을 수 없어서, 범례와 툴팁 양쪽에
 // "무엇을 기준으로 계산한 선인지"를 상품명까지 붙여 적는다.
-const CHART_COLORS = {current:'#55d7e7', optimized:'#55efaa', target:'#efc76d'};
+// v25: 라이트 테마 계열색. dataviz 검증 통과(흰 배경 기준, 인접쌍 CVD ΔE 30.2 / 일반 ΔE 39.2).
+// 목표선은 계열이 아니라 기준선이라 계열색을 주지 않고 중립 회색으로 물러나게 둔다.
+// styles.css의 --series-1/--series-2/--chart-target과 같은 값이다. 한쪽만 고치지 말 것.
+const CHART_COLORS = {current:'#215ee9', optimized:'#eb6834', target:'#6b6b6b'};
+const CHART_INK = {grid:'#e7e8e8', axis:'#8a8f98', surface:'#ffffff', tooltipBg:'#ffffff', tooltipLine:'#dadadb', tooltipInk:'#1f1f1f'};
 let chartState = null;
 
 // name은 범례용 전체 이름, short는 툴팁용 짧은 이름이다. 툴팁은 커서를 따라다니며 그래프를
@@ -790,10 +992,10 @@ function drawChart(current, optimized, target, meta){
   }
   meta = meta || {};
   const W=980,H=360,L=70,R=26,T=24,B=45,iw=W-L-R,ih=H-T-B; const all=[...current,...optimized].map(x=>Number(x.value)); const max=Math.max(target,...all)*1.1; const last=Math.max(current.at(-1).year,optimized.at(-1).year); const x=y=>L+(y/last)*iw; const y=v=>T+ih-(v/max)*ih; const pts=s=>s.map(d=>`${x(d.year).toFixed(1)},${y(d.value).toFixed(1)}`).join(' '); let html='';
-  for(let i=0;i<=5;i++){const val=max*i/5,yy=y(val);html+=`<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="#21372e"/><text x="${L-9}" y="${yy+4}" text-anchor="end" fill="#8ea49a" font-size="10">${fmtMoney(val)}</text>`;}
-  const ty=y(target); html+=`<line x1="${L}" y1="${ty}" x2="${W-R}" y2="${ty}" stroke="#efc76d" stroke-width="2" stroke-dasharray="7 7"/><text x="${W-R}" y="${Math.max(12,ty-7)}" text-anchor="end" fill="#efc76d" font-size="10">목표</text>`;
-  html+=`<polyline points="${pts(current)}" fill="none" stroke="#55d7e7" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="${pts(optimized)}" fill="none" stroke="#55efaa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
-  [0,Math.round(last/2),last].forEach(t=>html+=`<text x="${x(t)}" y="${H-13}" text-anchor="middle" fill="#8ea49a" font-size="10">${t}년</text>`);
+  for(let i=0;i<=5;i++){const val=max*i/5,yy=y(val);html+=`<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="${CHART_INK.grid}"/><text x="${L-9}" y="${yy+4}" text-anchor="end" fill="${CHART_INK.axis}" font-size="10">${fmtMoney(val)}</text>`;}
+  const ty=y(target); html+=`<line x1="${L}" y1="${ty}" x2="${W-R}" y2="${ty}" stroke="${CHART_COLORS.target}" stroke-width="2" stroke-dasharray="7 7"/><text x="${W-R}" y="${Math.max(12,ty-7)}" text-anchor="end" fill="${CHART_COLORS.target}" font-size="10">목표</text>`;
+  html+=`<polyline points="${pts(current)}" fill="none" stroke="${CHART_COLORS.current}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="${pts(optimized)}" fill="none" stroke="${CHART_COLORS.optimized}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
+  [0,Math.round(last/2),last].forEach(t=>html+=`<text x="${x(t)}" y="${H-13}" text-anchor="middle" fill="${CHART_INK.axis}" font-size="10">${t}년</text>`);
   // 히트 영역이 먼저 와서 선들 뒤에 깔리고, 툴팁 레이어는 그 위에 얹되 이벤트를 가로채지 않는다.
   html+=`<rect id="chartHit" x="${L}" y="${T}" width="${iw}" height="${ih}" fill="transparent" style="cursor:crosshair"/>`;
   html+=`<g id="chartHover" style="pointer-events:none;display:none"></g>`;
@@ -845,18 +1047,18 @@ function showChartHover(year){
   const bx = cx + 14 + bw <= st.L + st.iw ? cx + 14 : cx - 14 - bw;
   const by = Math.min(Math.max(st.y(rows[0].value) - bh/2, st.T + 2), st.T + st.ih - bh - 2);
 
-  let h=`<line x1="${cx}" y1="${st.T}" x2="${cx}" y2="${st.T+st.ih}" stroke="#8ea49a" stroke-width="1" stroke-dasharray="4 4"/>`;
-  rows.forEach(r=>{ h+=`<circle cx="${cx}" cy="${st.y(r.value)}" r="5" fill="#07110e" stroke="${r.color}" stroke-width="3"/>`; });
-  h+=`<circle cx="${cx}" cy="${st.y(st.target)}" r="5" fill="#07110e" stroke="${CHART_COLORS.target}" stroke-width="3"/>`;
-  h+=`<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="10" fill="#0b1c16" stroke="#2b4a3d"/>`;
-  h+=`<text x="${(bx+PAD).toFixed(1)}" y="${(by+PAD+FS-1).toFixed(1)}" fill="#8ea49a" font-size="${FS}" font-weight="700">${esc(title)}</text>`;
+  let h=`<line x1="${cx}" y1="${st.T}" x2="${cx}" y2="${st.T+st.ih}" stroke="${CHART_INK.axis}" stroke-width="1" stroke-dasharray="4 4"/>`;
+  rows.forEach(r=>{ h+=`<circle cx="${cx}" cy="${st.y(r.value)}" r="5" fill="${CHART_INK.surface}" stroke="${r.color}" stroke-width="3"/>`; });
+  h+=`<circle cx="${cx}" cy="${st.y(st.target)}" r="5" fill="${CHART_INK.surface}" stroke="${CHART_COLORS.target}" stroke-width="3"/>`;
+  h+=`<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="10" fill="${CHART_INK.tooltipBg}" stroke="${CHART_INK.tooltipLine}" stroke-width="1"/>`;
+  h+=`<text x="${(bx+PAD).toFixed(1)}" y="${(by+PAD+FS-1).toFixed(1)}" fill="${CHART_INK.axis}" font-size="${FS}" font-weight="700">${esc(title)}</text>`;
   lines.forEach((l,i)=>{
     const ly=by+PAD+FS+4+LH*i+FS-2;
     // 목표선은 그래프에서 파선이므로 툴팁 표식도 파선으로 맞춘다.
     h+= l.dash
       ? `<line x1="${(bx+PAD).toFixed(1)}" y1="${(ly-3).toFixed(1)}" x2="${(bx+PAD+9).toFixed(1)}" y2="${(ly-3).toFixed(1)}" stroke="${l.color}" stroke-width="2" stroke-dasharray="3 2"/>`
       : `<rect x="${(bx+PAD).toFixed(1)}" y="${(ly-FS+2).toFixed(1)}" width="8" height="8" rx="2" fill="${l.color}"/>`;
-    h+=`<text x="${(bx+PAD+14).toFixed(1)}" y="${ly.toFixed(1)}" fill="#e8f3ee" font-size="${FS}">${esc(l.text)}</text>`;
+    h+=`<text x="${(bx+PAD+14).toFixed(1)}" y="${ly.toFixed(1)}" fill="${CHART_INK.tooltipInk}" font-size="${FS}">${esc(l.text)}</text>`;
   });
   g.innerHTML=h;
   g.setAttribute('style','pointer-events:none');
@@ -1004,11 +1206,8 @@ async function sendChat(){
   const typing=chatAppend((()=>{const t=chatEl('div','chat-typing'); t.innerHTML='<i></i><i></i><i></i>'; return t;})());
 
   try{
-    const res=await fetch('/api/chat',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({analysis_id:analysisId, message:text, history:chatHistory.slice(-6)}),
-    });
+    const res=await postJson('/api/chat',
+      {analysis_id:analysisId, message:text, history:chatHistory.slice(-6)});
     typing.remove();
     if(res.status===404){
       analysisId=null;
@@ -1025,7 +1224,9 @@ async function sendChat(){
   }catch(err){
     console.error('챗봇 응답 실패:',err);
     typing.remove();
-    chatAppend(chatEl('div','chat-msg bot error','답변을 가져오지 못했습니다. 잠시 후 다시 시도해주세요.'));
+    // 서버가 꺼져 있으면 '잠시 후 다시 시도'는 영원히 틀린 안내다. 원인을 그대로 알린다.
+    chatAppend(chatEl('div','chat-msg bot error', err instanceof ServerUnreachableError
+      ? err.message : '답변을 가져오지 못했습니다. 잠시 후 다시 시도해주세요.'));
   }finally{
     chatBusy=false;
     $('chatSendBtn').disabled=false;

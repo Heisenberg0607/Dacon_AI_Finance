@@ -19,6 +19,7 @@ from typing import Any
 from .formatting import won_amount
 from .guardrails import answer_issues
 from .models import UserPensionInput
+from .query_expansion import QueryExpander, normalize_query_text
 from .qwen_client import QwenGateway
 from .rag import PensionRAG
 from .tools import (
@@ -47,7 +48,9 @@ CHAT_TOOL_DEFINITIONS = [
             'description': (
                 '퇴직연금 상품설명서 PDF 코퍼스에서 근거를 검색한다. '
                 "scope='selected'는 사용자가 가입한 그 상품 PDF 안에서만, "
-                "scope='all'은 전체 상품 DB에서 검색한다. 다른 상품과 비교하는 질문에만 'all'을 쓴다."
+                "scope='all'은 전체 상품 DB에서 검색한다. 다른 상품과 비교하는 질문에만 'all'을 쓴다. "
+                '질의는 서버가 오타·띄어쓰기를 교정하고 문서 용어로 확장하므로 '
+                '사용자가 쓴 표현을 그대로 넣어도 된다. 검색어를 억지로 전문용어로 바꾸지 마라.'
             ),
             'parameters': {
                 'type': 'object',
@@ -126,6 +129,9 @@ class ReportChatAgent:
     def __init__(self, qwen: QwenGateway, rag: PensionRAG):
         self.qwen = qwen
         self.rag = rag
+        # 확장어를 코퍼스 어휘로 제한하기 위해 RAG의 idf를 그대로 넘긴다.
+        # PDF가 바뀌면 살아남는 동의어 매핑도 함께 바뀐다.
+        self.query_expander = QueryExpander(rag.idf)
 
     # ------------------------------------------------------------------ fact sheet
 
@@ -453,19 +459,29 @@ class ReportChatAgent:
     def _execute_tool(self, name: str, args: dict[str, Any], user: UserPensionInput, result: dict[str, Any], state: dict[str, Any]):
         if name == 'search_pension_documents':
             scope = args.get('scope') or 'selected'
+            raw_query = str(args.get('query') or '')[:300]
+            # 구어체·오타·띄어쓰기를 문서 어휘로 옮긴다. LLM이 만든 질의든 사용자 문장이
+            # 그대로 들어온 폴백 경로든 같은 전처리를 거친다.
+            expansion = self.query_expander.expand(
+                raw_query,
+                context_terms=(user.product_name or '', user.provider or '', user.investment_type or ''),
+            )
+            state['query_expansion'] = expansion
             payload = self.rag.search(
-                query=str(args.get('query') or '')[:300],
+                query=raw_query,
                 provider=user.provider,
                 product_name=user.product_name,
                 risk_type=user.investment_type,
                 top_k=int(args.get('top_k') or 5),
                 scope=scope,
+                expanded_query=expansion['expanded_query'],
             )
             rows = self._register_evidence(state, result, payload.get('results', []))
             state['search_scope'] = payload.get('search_scope', scope)
             return {
                 'search_scope': payload.get('search_scope'),
                 'mode': payload.get('mode'),
+                'lexical_query': payload.get('lexical_query'),
                 'results': [
                     {
                         'evidence_id': r['evidence_id'],
@@ -508,6 +524,7 @@ class ReportChatAgent:
             'what_if': None,
             'tool_trace': [],
             'search_scope': 'selected',
+            'query_expansion': None,
         }
         fact_sheet = self._fact_sheet(user, result)
 
@@ -590,6 +607,8 @@ class ReportChatAgent:
             'what_if': state['what_if'],
             'tool_trace': state['tool_trace'],
             'search_scope': state['search_scope'],
+            # 질문을 어떻게 고쳐 검색했는지. 근거가 엉뚱할 때 확장 때문인지 바로 가려낼 수 있다.
+            'query_expansion': state['query_expansion'],
             'guardrail': guardrail,
         }
 
@@ -597,7 +616,8 @@ class ReportChatAgent:
 
     def _fallback_what_if(self, user: UserPensionInput, result: dict[str, Any], message: str, state: dict[str, Any]) -> dict[str, Any] | None:
         """Qwen 없이도 what-if가 동작하도록 질문에서 숫자를 직접 뽑는다."""
-        text = message.replace(' ', '')
+        # 전각 숫자('１２００만원')와 오타를 먼저 정리한다. 아래 정규식은 반각 숫자만 읽는다.
+        text = normalize_query_text(message)[0].replace(' ', '')
         args: dict[str, Any] = {}
 
         m = re.search(r'([\d,]+)\s*만?\s*원?[^0-9]{0,6}(?:납입|불입|넣)', text)
@@ -642,7 +662,9 @@ class ReportChatAgent:
         opt = fact_sheet['optimizer']
         ext = fact_sheet['product_extraction']
         is_db = user.operation_type == 'DB'
-        text = message.replace(' ', '')
+        # 검색과 키워드 라우팅이 같은 표기를 보게 한다. '퇴직년금'이라고 적은 질문이
+        # 검색에서는 교정되고 분기에서만 걸러지는 일이 없도록.
+        text = normalize_query_text(message)[0].replace(' ', '')
 
         what_if = self._fallback_what_if(user, result, message, state)
         if what_if is not None:

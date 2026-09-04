@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+import queue
+import threading
 import time
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.agents import HybridAgenticWorkflow
@@ -14,6 +18,7 @@ from backend.rag import PensionRAG
 from backend.config import ROOT
 from backend.eta_store import RunTimeHistory
 from backend.session_store import AnalysisStore
+from backend.source_documents import SourceDocumentStore
 from backend.tools import (
     estimate_wage_growth,
     finance_engine_tool,
@@ -31,6 +36,7 @@ workflow = HybridAgenticWorkflow(qwen, rag)
 chat_agent = ReportChatAgent(qwen, rag)
 analysis_store = AnalysisStore()
 run_times = RunTimeHistory()
+source_documents = SourceDocumentStore()
 
 app = FastAPI(title='깨움 KKAEUM - Hybrid Agentic AI Workflow', version='1.9.0')
 app.mount('/static', StaticFiles(directory=FRONTEND), name='static')
@@ -68,8 +74,9 @@ def catalog():
 def eta(operation_type: OperationType = 'DC'):
     """2단계 대기 화면이 쓰는 예상 소요시간.
 
-    실제로 측정된 total_seconds만 근거로 삼는다. 응답의 source가 그 근거를 밝힌다.
+    fixed가 아니면 실제로 측정된 total_seconds만 근거로 삼는다. 응답의 source가 그 근거를 밝힌다.
 
+      fixed    - eta_store.FIXED_ESTIMATE_SECONDS로 정해둔 고정 예상시간 (설정돼 있으면 최우선)
       measured - 이 서버의 라이브 이력
       baseline - 저장소에 커밋된 실측 baseline (새로 클론한 환경의 첫 분석)
       related  - 같은 실행모드의 다른 운영유형 (basis_operation_type에 어떤 유형인지 담긴다)
@@ -81,6 +88,26 @@ def eta(operation_type: OperationType = 'DC'):
     if estimate is None:
         return {'available': False, 'operation_type': operation_type}
     return {'available': True, **estimate}
+
+
+@app.get('/api/source-document')
+def source_document(file_id: str):
+    """보고서에서 분석에 쓴 상품설명서 PDF 원문을 그대로 내려받는다.
+
+    file_id는 경로가 아니라 source_pdf_map.json의 키다. 실제로 열 zip 항목명은 map이 주고
+    모르는 값은 404로 끝나므로, 클라이언트가 보낸 문자열이 파일 경로가 되는 일은 없다.
+    """
+    found = source_documents.read(file_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail='선택한 상품의 원문 PDF를 찾지 못했습니다.')
+    filename, data = found
+    # 파일명이 한글이라 RFC 5987 filename*로 보낸다. filename=은 이를 못 읽는 클라이언트용 대비책.
+    disposition = f"attachment; filename=\"source.pdf\"; filename*=UTF-8''{quote(filename)}"
+    return Response(
+        content=data,
+        media_type='application/pdf',
+        headers={'Content-Disposition': disposition, 'Content-Length': str(len(data))},
+    )
 
 
 @app.post('/api/estimate-wage-growth')
@@ -98,10 +125,22 @@ def product_extraction(user: UserPensionInput):
     return workflow._extract_selected_product(user)
 
 
+def _mark_source_document(result: dict) -> dict:
+    """보고서 화면이 '원문 PDF 다운로드' 버튼을 띄울지 판단할 근거를 심는다.
+
+    카탈로그를 다시 만들고 source_pdf_map.json을 갱신하지 않으면 file_id는 있는데 내려받을
+    원문은 없는 상태가 된다. 그때 버튼을 띄워두면 눌러야 없다는 걸 알게 되므로 미리 확인한다.
+    """
+    extraction = result.get('product_extraction')
+    if isinstance(extraction, dict):
+        extraction['source_document_available'] = source_documents.has(extraction.get('source_file_id'))
+    return result
+
+
 @app.post('/api/analyze')
 def analyze(user: UserPensionInput):
     started = time.perf_counter()
-    result = workflow.run(user)
+    result = _mark_source_document(workflow.run(user))
     # 보고서 화면 챗봇이 같은 분석 context를 이어서 쓰도록 서버에 잠시 보관한다.
     result['analysis_id'] = analysis_store.put(user, result)
     # 다음 사용자의 '예상 남은 시간'은 이 실측값들만 근거로 계산된다.
@@ -112,6 +151,74 @@ def analyze(user: UserPensionInput):
     # 둘을 같게 맞추면 게이지가 항상 예상 시간을 초과한다. 불일치로 보고 되돌리지 말 것.
     run_times.record(user.operation_type, time.perf_counter() - started, qwen.enabled)
     return result
+
+
+# 스트리밍이 한 건이라도 흘렀는지 화면이 알 수 있게, 이벤트가 없어도 주기적으로 보내는 주석행.
+# 프록시가 응답을 버퍼링하면 첫 이벤트까지 아무것도 도착하지 않아 연결이 끊긴 것처럼 보인다.
+SSE_KEEPALIVE_SECONDS = 15
+
+
+def _sse(payload: dict) -> str:
+    # default=str: datetime 등 JSON이 모르는 값이 섞여도 스트림이 끊기지 않게 한다.
+    return f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+
+
+@app.post('/api/analyze/stream')
+def analyze_stream(user: UserPensionInput):
+    """/api/analyze와 같은 분석을 하되, 단계 진행을 실시간으로 흘려보낸다.
+
+    기존 /api/analyze는 9단계를 모두 끝낸 뒤에야 한 번에 응답한다. 그래서 화면은 서버가
+    어디까지 왔는지 알 방법이 없었고, 단계 표시를 900ms 타이머로 흉내 낼 수밖에 없었다.
+    그 결과 마지막 칸에 도달한 뒤의 시간이 전부 '보고서 생성'에 쓰인 것처럼 보였다.
+
+    이 엔드포인트는 workflow.run의 on_event 통보를 그대로 SSE로 내보낸다. 화면의 칸은
+    서버가 실제로 그 단계에 들어갔을 때 움직인다.
+
+    이벤트 종류:
+      {"type":"stage",  "stage":..., "status":"running"|"done"|"retry"|..., ...}
+      {"type":"result", "result":{...}}   분석 완료. 기존 /api/analyze 응답과 같은 형태
+      {"type":"error",  "message":"..."}  분석 실패
+
+    EventSource는 GET만 지원하므로 화면은 fetch + ReadableStream으로 읽는다.
+    분석 자체는 별도 스레드에서 돌리고 제너레이터는 큐를 비우기만 한다. workflow.run이
+    동기 코드라 그대로 두면 첫 이벤트가 나오기 전에 응답이 완성돼 버린다.
+    """
+    def event_source():
+        events: queue.Queue = queue.Queue()
+        done = object()
+
+        def work():
+            started = time.perf_counter()
+            try:
+                result = _mark_source_document(
+                    workflow.run(user, on_event=lambda e: events.put({'type': 'stage', **e}))
+                )
+                # 챗봇/상품비교가 이어서 쓰도록 blocking 경로와 똑같이 세션에 보관한다.
+                result['analysis_id'] = analysis_store.put(user, result)
+                run_times.record(user.operation_type, time.perf_counter() - started, qwen.enabled)
+                events.put({'type': 'result', 'result': result})
+            except Exception as exc:  # noqa: BLE001 - 실패도 스트림으로 알려야 화면이 멈추지 않는다
+                events.put({'type': 'error', 'message': f'{type(exc).__name__}: {exc}'})
+            finally:
+                events.put(done)
+
+        threading.Thread(target=work, daemon=True).start()
+        while True:
+            try:
+                item = events.get(timeout=SSE_KEEPALIVE_SECONDS)
+            except queue.Empty:
+                yield ': keepalive\n\n'
+                continue
+            if item is done:
+                return
+            yield _sse(item)
+
+    return StreamingResponse(
+        event_source(),
+        media_type='text/event-stream',
+        # 프록시(nginx 등)가 스트림을 모아두면 실시간이 아니게 된다.
+        headers={'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no'},
+    )
 
 
 @app.post('/api/reproject')

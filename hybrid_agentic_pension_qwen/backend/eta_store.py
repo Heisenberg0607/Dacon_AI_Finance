@@ -13,6 +13,16 @@ TIMINGS_PATH = DATA_DIR / 'run_timings.json'
 # 새로 클론한 환경에서도 첫 분석부터 남은 시간을 추정할 수 있게 해준다.
 BASELINE_PATH = DATA_DIR / 'run_timings_baseline.json'
 
+# 보고서 생성 예상시간을 실측 분포 대신 정해둔 한 값으로 고정한다.
+#
+# None이면 아래 근거 사다리(measured -> baseline -> related)가 그대로 동작한다.
+# 숫자를 넣으면 운영유형·실행모드와 무관하게 항상 그 값을 예상시간으로 쓴다.
+#
+# 지금 값은 실측이 아니라 제품 결정이다. 근거로 댈 표본이 없으므로 화면은 '실측 N회 중
+# 80%가 이내 완료' 같은 근거 문구를 아예 띄우지 않고 경과 시간만 보여준다.
+# 실제 소요시간과 얼마나 맞는지는 scripts/measure_qwen_eta.py로 확인할 수 있다.
+FIXED_ESTIMATE_SECONDS: float | None = 180.0  # 3분
+
 # 남은 시간은 백분위수로 잡는다. 중앙값을 쓰면 정의상 과거 실행의 절반이 그 값을 넘어
 # '예상 시간 초과' 상태가 상시로 뜬다. 80분위수는 표본의 80%가 그 안에 끝났다는 뜻이라
 # 초과가 5회에 1번꼴로 줄고, 임의의 안전계수를 곱하지 않아 근거가 실측 표본 안에 그대로 남는다.
@@ -42,9 +52,14 @@ class RunTimeHistory:
     이력이 비어 있을 때를 대비해 근거를 아래 순서로 찾는다. 어느 단계에서 나온 값인지는
     결과의 source에 담아 화면이 근거를 그대로 밝힐 수 있게 한다.
 
+      0. fixed     - FIXED_ESTIMATE_SECONDS가 설정돼 있으면 항상 이것
       1. measured  - 이 PC의 라이브 이력, 정확히 같은 버킷
       2. baseline  - 저장소에 커밋된 실측 baseline, 정확히 같은 버킷
       3. related   - 같은 실행모드의 다른 운영유형 (라이브 -> baseline 순)
+
+    fixed는 백분위수가 아니라 '정해둔 한 값'이라 percentile을 None으로 돌려준다.
+    표본에서 나온 값이 아니므로 '표본의 N%가 이내 완료'라고 적으면 거짓말이 되고,
+    대신 적을 근거도 없다. 그래서 화면은 근거 문구 없이 경과 시간만 보여준다.
 
     실행모드 경계는 넘지 않는다. demo(0.1초대)와 qwen(수십 초)을 섞으면 추정이 무의미해진다.
     """
@@ -54,6 +69,7 @@ class RunTimeHistory:
         path: Path = TIMINGS_PATH,
         max_samples: int = 30,
         baseline_path: Path = BASELINE_PATH,
+        fixed_seconds: float | None = FIXED_ESTIMATE_SECONDS,
     ) -> None:
         self.path = path
         self.baseline_path = baseline_path
@@ -62,6 +78,7 @@ class RunTimeHistory:
         self._samples: dict[str, list[float]] = self._read(self.path)
         # baseline은 서버가 절대 쓰지 않는다. 기동 시 한 번만 읽는다.
         self._baseline: dict[str, list[float]] = self._read(self.baseline_path)
+        self._fixed_seconds = fixed_seconds if (fixed_seconds or 0) > 0 else None
 
     def _read(self, path: Path) -> dict[str, list[float]]:
         try:
@@ -114,6 +131,19 @@ class RunTimeHistory:
         baseline = self._baseline
 
         exact = self._key(operation_type, qwen_enabled)
+
+        # 고정값이 설정돼 있으면 그것을 쓴다. 실측 이력이 쌓여도 흔들리지 않는다.
+        if self._fixed_seconds is not None:
+            return {
+                'operation_type': operation_type,
+                'source': 'fixed',
+                'percentile': None,
+                'expected_seconds': round(self._fixed_seconds, 2),
+                'min_seconds': None,
+                'max_seconds': None,
+                'sample_size': None,
+            }
+
         for store, source in ((live, 'measured'), (baseline, 'baseline')):
             samples = store.get(exact)
             if samples:

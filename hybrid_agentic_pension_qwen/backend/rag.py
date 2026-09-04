@@ -132,20 +132,31 @@ class PensionRAG:
         risk_type: str | None = None,
         top_k: int = 6,
         scope: str = 'selected',
+        expanded_query: str | None = None,
     ) -> dict[str, Any]:
         """scope='selected'는 선택 상품 PDF 안에서만, scope='all'은 전체 코퍼스에서 검색한다.
 
         분석 파이프라인(agents.py)은 기본값 'selected'를 그대로 사용해 기존 동작을 유지하고,
         보고서 챗봇만 'all'로 전체 상품 DB를 열어 비교 질문에 답한다.
+
+        expanded_query는 챗봇의 질의 확장 결과(query_expansion.py)다. lexical 매칭에만 쓰고
+        semantic 임베딩은 언제나 원문 query로 만든다. 확장어를 잔뜩 붙인 문장을 임베딩하면
+        질문의 의미가 오히려 흐려지기 때문이다. None이면 기존과 완전히 같게 동작한다.
         """
         scope = scope if scope in {'selected', 'all'} else 'selected'
         if not self.chunks:
-            return {'mode': self.mode, 'query': query, 'search_scope': scope, 'results': []}
+            return {
+                'mode': self.mode,
+                'query': query,
+                'lexical_query': expanded_query or query,
+                'search_scope': scope,
+                'results': [],
+            }
 
         resolved = self.resolve_product(provider, product_name) if product_name else None
         selected_file_id = resolved.get('file_id') if resolved else None
         exact_file_id = selected_file_id if scope == 'selected' else None
-        q_tokens = set(tokenize(query))
+        q_tokens = set(tokenize(expanded_query or query))
         semantic = self._semantic_scores(query)
         scored = []
 
@@ -198,6 +209,7 @@ class PensionRAG:
         return {
             'mode': self.mode,
             'query': query,
+            'lexical_query': expanded_query or query,
             'search_scope': scope,
             'resolved_product': resolved,
             'selected_file_id': selected_file_id,

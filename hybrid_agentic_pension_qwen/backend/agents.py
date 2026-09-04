@@ -19,6 +19,41 @@ from .rag import PensionRAG
 from .tools import finance_engine_tool, monte_carlo_tool, portfolio_optimizer_tool, profile_tool
 
 
+# 코드가 _deterministic_critic_checks에서 실제로 수행하는 검증 항목의 이름표.
+#
+# 왜 상수로 빼는가: 이전에는 이 목록이 demo 분기 안에만 하드코딩돼 있었다. 그래서
+#   (1) Qwen 모드에서는 LLM이 checks를 비워 보내면 화면의 'AI 전략 검증' 칸이 통째로 비었고,
+#   (2) DB형에도 '상품 PDF 매칭' 같은, 하지도 않은 검사가 적혔다.
+# 목록을 검사 로직 옆에 두고 운영유형으로 갈라서 두 문제를 함께 막는다.
+#
+# 여기 적힌 항목은 모두 코드가 실제로 돌리는 검사다. 통과 여부와 무관하게 '무엇을 봤는지'를
+# 밝히는 용도이고, 실패한 항목은 issues로 따로 나간다.
+CRITIC_CHECKS_DC_IRP = (
+    '선택 상품 PDF 정확 매칭',
+    'PDF 구성비중 구조화 가능 여부',
+    '금융계산이 선택 상품 PDF 기준인지',
+    '문서 위험등급 근거 검증',
+    '포트폴리오 최적화 적용 여부',
+    '추천 자산배분 합계 100%',
+    '최적화 자산배분 방향 일관성',
+    '수익 보장 표현 검증',
+    '금액 단위 표기 검증',
+    'RAG 근거 확보 및 ID 유효성',
+)
+CRITIC_CHECKS_DB = (
+    'DB형을 개인 적립금·상품 구조로 표현했는지',
+    '개인 포트폴리오 최적화 미적용 여부',
+    '수익 보장 표현 검증',
+    '금액 단위 표기 검증',
+    'RAG 근거 ID 유효성',
+)
+
+
+def critic_check_labels(operation_type: str) -> list[str]:
+    """이번 분석에서 코드가 실제로 돌린 결정론적 검증 항목."""
+    return list(CRITIC_CHECKS_DB if operation_type == 'DB' else CRITIC_CHECKS_DC_IRP)
+
+
 TOOL_DEFINITIONS = [
     {
         'type': 'function',
@@ -91,25 +126,52 @@ class TimedTrace(list):
     - stamp_last(): 이미 append된 마지막 entry의 소요시간을 지금 시점 기준으로 다시 기록한다.
       ('running' 상태로 먼저 append 하고 작업 후 상태를 갱신하는 단계용)
     시간은 Python이 측정하며 LLM이 만들어내지 않는다.
+
+    on_event를 주면 단계가 시작·완료될 때마다 그 entry를 그대로 통보한다.
+    /api/analyze/stream이 이 통보를 SSE로 흘려보내 화면의 단계 표시를 실제 진행에 맞춘다.
+    통보는 부수효과일 뿐이라 trace의 내용과 소요시간 측정에는 영향을 주지 않는다.
+    on_event가 던진 예외가 분석을 중단시키지 않도록 삼킨다. 진행 표시 실패가 보고서
+    생성을 망치면 안 된다.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, on_event: Any = None) -> None:
         super().__init__()
         self.started_at = datetime.now()
         self._start = time.perf_counter()
         self._mark = self._start
+        self.on_event = on_event
+
+    def _notify(self, entry: dict[str, Any]) -> None:
+        if not self.on_event:
+            return
+        try:
+            self.on_event(dict(entry))
+        except Exception:
+            pass
+
+    def begin(self, stage: str, tool: str | None = None, selected_by: str | None = None) -> None:
+        """단계를 시작했다는 신호만 보낸다. trace에는 남기지 않는다.
+
+        _fallback_run_tools처럼 '작업을 끝내고 결과를 append'하는 단계는 완료 시점에만
+        기록이 남는다. 그러면 화면은 이미 끝난 단계만 알게 되어 '지금 무엇을 하는 중인지'를
+        보여줄 수 없다. 시작 신호를 따로 보내되, 소요시간 측정 기준(mark)은 건드리지 않는다.
+        """
+        self._notify({'stage': stage, 'tool': tool, 'selected_by': selected_by, 'status': 'running'})
 
     def append(self, entry: dict[str, Any]) -> None:  # type: ignore[override]
         now = time.perf_counter()
         entry['elapsed_seconds'] = round(now - self._mark, 2)
         self._mark = now
         super().append(entry)
+        self._notify(entry)
 
     def stamp_last(self) -> None:
         now = time.perf_counter()
         if self:
             self[-1]['elapsed_seconds'] = round(now - self._mark, 2)
         self._mark = now
+        if self:
+            self._notify(self[-1])
 
     @property
     def total_seconds(self) -> float:
@@ -202,6 +264,9 @@ class HybridAgenticWorkflow:
             key = self._context_key(name)
             if key in context:
                 continue
+            # 이 단계는 작업을 끝낸 뒤에야 trace에 남는다. 화면이 '지금 무엇을 하는 중인지'를
+            # 보여주려면 시작 시점에도 신호가 필요하다.
+            trace.begin(key, name, 'fallback-orchestrator')
             result = self._execute_tool(name, args, user, context)
             context[key] = result
             trace.append({'stage': key, 'tool': name, 'status': 'done', 'selected_by': 'fallback-orchestrator'})
@@ -244,6 +309,7 @@ class HybridAgenticWorkflow:
                 except Exception:
                     args = {}
                 try:
+                    trace.begin(self._context_key(name), name, 'Qwen function calling')
                     result = self._execute_tool(name, args, user, context)
                     key = self._context_key(name)
                     if key == 'rag' and key in context and user.operation_type != 'DB':
@@ -416,11 +482,12 @@ class HybridAgenticWorkflow:
 
     def _critic_agent(self, user: UserPensionInput, context: dict, recommendation: dict) -> dict:
         deterministic_issues = self._deterministic_critic_checks(user, recommendation, context)
+        base_checks = critic_check_labels(user.operation_type)
         if not self.qwen.enabled:
             return {
                 'passed': not deterministic_issues,
                 'issues': deterministic_issues,
-                'checks': ['정확한 상품 PDF 매칭', 'PDF 구성비중 구조화', '위험등급 근거 검증', 'Python 금융계산 사용', '최적화 자산배분 일관성', 'RAG 근거 ID 검증', '보장 표현 검증'],
+                'checks': base_checks,
                 'revision_instructions': '; '.join(deterministic_issues),
             }
         payload = {
@@ -446,7 +513,12 @@ class HybridAgenticWorkflow:
         ], temperature=0.1)
         parsed = self.qwen.parse_json(resp.choices[0].message.content or '', {})
         if not parsed:
-            parsed = {'passed': not deterministic_issues, 'issues': deterministic_issues, 'checks': [], 'revision_instructions': '; '.join(deterministic_issues)}
+            parsed = {'passed': not deterministic_issues, 'issues': deterministic_issues, 'revision_instructions': '; '.join(deterministic_issues)}
+        # LLM이 checks를 비워 보내거나 아예 빼먹으면 화면의 검증 칸이 통째로 빈다. 그런데
+        # 코드가 돌린 결정론적 검사는 LLM 응답과 무관하게 실제로 실행됐으므로, 그 목록을
+        # 항상 앞에 두고 LLM이 추가한 항목만 뒤에 이어 붙인다. 중복은 순서를 지키며 제거한다.
+        llm_checks = [str(x) for x in (parsed.get('checks') or []) if str(x).strip()]
+        parsed['checks'] = list(dict.fromkeys(base_checks + llm_checks))
         if deterministic_issues:
             parsed['passed'] = False
             parsed['issues'] = list(dict.fromkeys((parsed.get('issues') or []) + deterministic_issues))
@@ -552,8 +624,13 @@ class HybridAgenticWorkflow:
             slot['seconds'] = round(slot['seconds'], 2)
         return list(totals.values())
 
-    def run(self, user: UserPensionInput) -> dict[str, Any]:
-        trace = TimedTrace()
+    def run(self, user: UserPensionInput, on_event: Any = None) -> dict[str, Any]:
+        """on_event를 주면 단계가 시작·완료될 때마다 그 entry를 통보한다.
+
+        통보는 부수효과일 뿐이고 반환값은 on_event 유무와 무관하게 동일하다.
+        /api/analyze(기존 blocking)와 /api/analyze/stream(SSE)이 같은 코드를 쓴다.
+        """
+        trace = TimedTrace(on_event=on_event)
         context: dict[str, Any] = {}
         planner_mode = 'Qwen function calling' if self.qwen.enabled else 'demo fallback orchestrator'
 
@@ -583,9 +660,11 @@ class HybridAgenticWorkflow:
             trace.append({'stage': 'recommendation', 'tool': 'Recommendation Agent', 'status': 'retry', 'selected_by': 'Qwen' if self.qwen.enabled else 'fallback', 'reason': revision})
             recommendation = self._recommendation_agent(user, context, critique=revision)
             trace.stamp_last()
+            trace.begin('critic', 'Critic Agent', 'Qwen' if self.qwen.enabled else 'fallback')
             critic = self._critic_agent(user, context, recommendation)
             trace.append({'stage': 'critic', 'tool': 'Critic Agent', 'status': 'done' if critic.get('passed') else 'revised-with-warnings', 'selected_by': 'Qwen' if self.qwen.enabled else 'fallback'})
 
+        trace.begin('report', 'Report Generator', 'Qwen' if self.qwen.enabled else 'template')
         report = self._report_agent(user, context, recommendation, critic)
         trace.append({'stage': 'report', 'tool': 'Report Generator', 'status': 'done', 'selected_by': 'Qwen' if self.qwen.enabled else 'template'})
 
