@@ -19,5 +19,8 @@ CATALOG_PATH = DATA_DIR / 'catalog.json'
 CHUNKS_PATH = DATA_DIR / 'chunks.jsonl'
 EMBEDDINGS_PATH = DATA_DIR / 'embeddings.npy'
 SOURCE_ZIP_PATH = DATA_DIR / 'source_documents.zip'
+# catalog의 file_id를 source_documents.zip 안의 원본 PDF 항목명에 이어준다.
+# scripts/build_source_pdf_map.py가 만든다.
+SOURCE_PDF_MAP_PATH = DATA_DIR / 'source_pdf_map.json'
 
 WITH_QWEN = APP_MODE != 'demo' and bool(DASHSCOPE_API_KEY)

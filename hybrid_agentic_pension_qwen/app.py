@@ -4,9 +4,10 @@ import json
 import queue
 import threading
 import time
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.agents import HybridAgenticWorkflow
@@ -17,6 +18,7 @@ from backend.rag import PensionRAG
 from backend.config import ROOT
 from backend.eta_store import RunTimeHistory
 from backend.session_store import AnalysisStore
+from backend.source_documents import SourceDocumentStore
 from backend.tools import (
     estimate_wage_growth,
     finance_engine_tool,
@@ -32,6 +34,7 @@ workflow = HybridAgenticWorkflow(qwen, rag)
 chat_agent = ReportChatAgent(qwen, rag)
 analysis_store = AnalysisStore()
 run_times = RunTimeHistory()
+source_documents = SourceDocumentStore()
 
 app = FastAPI(title='깨움 KKAEUM - Hybrid Agentic AI Workflow', version='1.9.0')
 app.mount('/static', StaticFiles(directory=FRONTEND), name='static')
@@ -79,6 +82,26 @@ def eta(operation_type: OperationType = 'DC'):
     return {'available': True, **estimate}
 
 
+@app.get('/api/source-document')
+def source_document(file_id: str):
+    """보고서에서 분석에 쓴 상품설명서 PDF 원문을 그대로 내려받는다.
+
+    file_id는 경로가 아니라 source_pdf_map.json의 키다. 실제로 열 zip 항목명은 map이 주고
+    모르는 값은 404로 끝나므로, 클라이언트가 보낸 문자열이 파일 경로가 되는 일은 없다.
+    """
+    found = source_documents.read(file_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail='선택한 상품의 원문 PDF를 찾지 못했습니다.')
+    filename, data = found
+    # 파일명이 한글이라 RFC 5987 filename*로 보낸다. filename=은 이를 못 읽는 클라이언트용 대비책.
+    disposition = f"attachment; filename=\"source.pdf\"; filename*=UTF-8''{quote(filename)}"
+    return Response(
+        content=data,
+        media_type='application/pdf',
+        headers={'Content-Disposition': disposition, 'Content-Length': str(len(data))},
+    )
+
+
 @app.post('/api/estimate-wage-growth')
 def wage_growth_estimate(user: UserPensionInput):
     # DB 입력폼에서 '깨움이 추정' 버튼이 호출하는 deterministic estimate.
@@ -94,10 +117,22 @@ def product_extraction(user: UserPensionInput):
     return workflow._extract_selected_product(user)
 
 
+def _mark_source_document(result: dict) -> dict:
+    """보고서 화면이 '원문 PDF 다운로드' 버튼을 띄울지 판단할 근거를 심는다.
+
+    카탈로그를 다시 만들고 source_pdf_map.json을 갱신하지 않으면 file_id는 있는데 내려받을
+    원문은 없는 상태가 된다. 그때 버튼을 띄워두면 눌러야 없다는 걸 알게 되므로 미리 확인한다.
+    """
+    extraction = result.get('product_extraction')
+    if isinstance(extraction, dict):
+        extraction['source_document_available'] = source_documents.has(extraction.get('source_file_id'))
+    return result
+
+
 @app.post('/api/analyze')
 def analyze(user: UserPensionInput):
     started = time.perf_counter()
-    result = workflow.run(user)
+    result = _mark_source_document(workflow.run(user))
     # 보고서 화면 챗봇이 같은 분석 context를 이어서 쓰도록 서버에 잠시 보관한다.
     result['analysis_id'] = analysis_store.put(user, result)
     # 다음 사용자의 '예상 남은 시간'은 이 실측값들만 근거로 계산된다.
@@ -147,7 +182,9 @@ def analyze_stream(user: UserPensionInput):
         def work():
             started = time.perf_counter()
             try:
-                result = workflow.run(user, on_event=lambda e: events.put({'type': 'stage', **e}))
+                result = _mark_source_document(
+                    workflow.run(user, on_event=lambda e: events.put({'type': 'stage', **e}))
+                )
                 # 챗봇/상품비교가 이어서 쓰도록 blocking 경로와 똑같이 세션에 보관한다.
                 result['analysis_id'] = analysis_store.put(user, result)
                 run_times.record(user.operation_type, time.perf_counter() - started, qwen.enabled)
