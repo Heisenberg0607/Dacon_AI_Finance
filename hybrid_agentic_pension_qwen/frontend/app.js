@@ -778,22 +778,10 @@ function renderReport(r){
   $('simulationComment').textContent=rep.simulation_comment || '';
   $('strategyList').innerHTML=(rep.strategy||rec.actions||[]).map(x=>`<div>${esc(x)}</div>`).join('');
 
-  $('ragModeLabel').textContent=ragModeKo(r.rag.mode);
-  const ragResults=r.rag.results||[];
-  $('evidenceGrid').innerHTML=ragResults.length
-    ? ragResults.map(e=>`<article class="evidence-card"><div class="e-head"><b>${esc(e.evidence_id)} · ${esc(e.provider)}</b><em>p.${esc(e.page)}</em></div><h4>${esc(e.title)}</h4><p>${esc(e.snippet)}</p></article>`).join('')
-    : '<div class="db-allocation-note">DB형 개인 분석에는 현재 디폴트옵션 상품 PDF RAG를 적용하지 않습니다.</div>';
-
-  const critic=r.critic||{};
-  $('criticStatus').textContent=critic.passed?'검증 완료':'수정 반영 / 주의';
-  $('criticStatus').className=`critic-pass ${critic.passed?'':'warn'}`;
-  const checks=[...(critic.checks||[]),...(critic.issues||[]).map(x=>`확인 필요: ${x}`)];
-  // 검증 항목이 하나도 없으면 '검증 완료' 배지 아래가 통째로 비어 고장처럼 보인다.
-  // 서버가 항상 채워 보내지만(agents.critic_check_labels), 빈 응답이 오더라도 화면이
-  // 침묵하지는 않게 사유를 적는다. 없는 항목을 지어내지는 않는다.
-  $('criticChecks').innerHTML = checks.length
-    ? checks.map(x=>`<div>${esc(x)}</div>`).join('')
-    : '<div class="check-empty">검증 항목을 가져오지 못했습니다. 서버 로그를 확인해주세요.</div>';
+  // v30: '금융지식 근거'와 'AI 전략 검증' 섹션을 보고서 화면에서 뺐다.
+  // 서버는 둘 다 계속 만든다. RAG 근거는 챗봇이 근거 칩으로 쓰고(setupChat),
+  // Critic은 보고서 문장을 검증·재생성하는 파이프라인 단계라 화면 표시와 무관하게 필요하다.
+  // 화면에서 지웠다고 백엔드를 지우면 검증 자체가 사라진다.
   $('riskNotes').innerHTML=(rep.risk_notes||[]).filter(Boolean).map(x=>`<div>${esc(x)}</div>`).join('');
   renderProjection(r);
   setupCompare(r);
