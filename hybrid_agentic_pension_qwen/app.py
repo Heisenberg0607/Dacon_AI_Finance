@@ -20,6 +20,8 @@ from backend.tools import (
     monte_carlo_tool,
     portfolio_optimizer_tool,
 )
+from routers.salary_growth import router as salary_growth_router
+from services.salary_growth.predictor import SalaryGrowthArtifactError, get_salary_growth_predictor
 
 FRONTEND = ROOT / 'frontend'
 
@@ -32,6 +34,7 @@ run_times = RunTimeHistory()
 
 app = FastAPI(title='깨움 KKAEUM - Hybrid Agentic AI Workflow', version='1.9.0')
 app.mount('/static', StaticFiles(directory=FRONTEND), name='static')
+app.include_router(salary_growth_router)
 
 
 @app.get('/')
@@ -41,6 +44,10 @@ def index():
 
 @app.get('/api/health')
 def health():
+    try:
+        salary_growth = get_salary_growth_predictor().validate_artifacts()
+    except SalaryGrowthArtifactError as exc:
+        salary_growth = {'ok': False, 'error': str(exc)}
     return {
         'ok': True,
         'qwen_enabled': qwen.enabled,
@@ -48,6 +55,7 @@ def health():
         'rag_mode': rag.mode,
         'documents': len(rag.catalog),
         'chunks': len(rag.chunks),
+        'salary_growth': salary_growth,
     }
 
 

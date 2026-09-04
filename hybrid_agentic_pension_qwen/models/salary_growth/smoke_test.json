@@ -1,0 +1,22 @@
+{
+  "model_file_exists": true,
+  "metadata_file_exists": true,
+  "occupation_categories_file_exists": true,
+  "age_growth_curve_file_exists": true,
+  "original_vs_reloaded_prediction": {
+    "rows": 100,
+    "max_abs_diff": 0.0,
+    "mean_abs_diff": 0.0,
+    "identical_with_atol_1e_12": true
+  },
+  "sample_prediction": {
+    "input": {
+      "age": 32,
+      "current_annual_salary_manwon": 5000,
+      "occupation": "-1.0"
+    },
+    "converted_monthly_wage_manwon": 416.6666666666667,
+    "converted_log_wage_t": 6.034683666227958,
+    "prediction_avg_annual_growth_pp": 2.348135859726894
+  }
+}

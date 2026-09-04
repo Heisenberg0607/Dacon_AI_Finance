@@ -1,0 +1,600 @@
+{
+  "source": "train_df only",
+  "target": "target_avg_wage_growth_t_to_t3",
+  "target_unit": "percentage points",
+  "smoothing": {
+    "method": "weighted centered moving average by age",
+    "primary_window_years": 2,
+    "fallback_window_years": 5,
+    "fallback_condition": "total sample size in +/-2 age window < 100",
+    "weights": "age-level n",
+    "validation_or_test_used": false
+  },
+  "global_train_mean": 7.46502636122985,
+  "curve": [
+    {
+      "age": 17,
+      "n": 2,
+      "mean": 5.0220959595959584,
+      "median": 5.0220959595959584,
+      "smoothed_mean": 17.922053183136853,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 18,
+      "n": 9,
+      "mean": 32.087706532150975,
+      "median": 37.10437710437711,
+      "smoothed_mean": 15.370195483262457,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 19,
+      "n": 38,
+      "mean": 17.45730460872697,
+      "median": 12.31576635924462,
+      "smoothed_mean": 18.862592757647665,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 20,
+      "n": 47,
+      "mean": 17.195321968836286,
+      "median": 7.197691197691198,
+      "smoothed_mean": 17.998838642800788,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 21,
+      "n": 89,
+      "mean": 19.31672361561053,
+      "median": 11.124716553287978,
+      "smoothed_mean": 15.140935058540437,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 22,
+      "n": 153,
+      "mean": 16.78479944925123,
+      "median": 10.836014578323427,
+      "smoothed_mean": 13.900022214813822,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 23,
+      "n": 239,
+      "mean": 11.761292125281098,
+      "median": 9.538473509061747,
+      "smoothed_mean": 12.59676894313421,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 24,
+      "n": 306,
+      "mean": 12.046493003766223,
+      "median": 9.288388543823327,
+      "smoothed_mean": 11.770875548359472,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 25,
+      "n": 387,
+      "mean": 10.34668822899261,
+      "median": 7.747795414462084,
+      "smoothed_mean": 11.142681128058962,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 26,
+      "n": 465,
+      "mean": 11.12997583334829,
+      "median": 8.354700854700852,
+      "smoothed_mean": 10.82794033082523,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 27,
+      "n": 509,
+      "mean": 10.925672781647625,
+      "median": 8.333333333333332,
+      "smoothed_mean": 10.373598923092661,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 28,
+      "n": 574,
+      "mean": 10.171450991709301,
+      "median": 7.877122877122881,
+      "smoothed_mean": 9.780704916687801,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 29,
+      "n": 685,
+      "mean": 9.634513512811528,
+      "median": 7.587719298245614,
+      "smoothed_mean": 9.303748554620189,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 30,
+      "n": 767,
+      "mean": 8.041009017184837,
+      "median": 6.405228758169934,
+      "smoothed_mean": 8.842144978339364,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 31,
+      "n": 890,
+      "mean": 8.650182934851344,
+      "median": 6.666666666666665,
+      "smoothed_mean": 8.41911614264145,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 32,
+      "n": 970,
+      "mean": 8.305571167125018,
+      "median": 6.337442837720927,
+      "smoothed_mean": 8.188865304864603,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 33,
+      "n": 1043,
+      "mean": 7.807371317946189,
+      "median": 6.309523809523814,
+      "smoothed_mean": 8.121012710585218,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 34,
+      "n": 1103,
+      "mean": 8.177556713681899,
+      "median": 6.380952380952383,
+      "smoothed_mean": 7.897737995306156,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 35,
+      "n": 1219,
+      "mean": 7.804996906373907,
+      "median": 6.1071253372577905,
+      "smoothed_mean": 7.872117786356522,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 36,
+      "n": 1256,
+      "mean": 7.502089594718669,
+      "median": 5.833867571483672,
+      "smoothed_mean": 7.7998360717374196,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 37,
+      "n": 1299,
+      "mean": 8.085518241405053,
+      "median": 5.977212506624271,
+      "smoothed_mean": 7.617110687544108,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 38,
+      "n": 1301,
+      "mean": 7.476970207979279,
+      "median": 5.565217391304348,
+      "smoothed_mean": 7.509138026581996,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 39,
+      "n": 1294,
+      "mean": 7.222438773543879,
+      "median": 5.387298633266376,
+      "smoothed_mean": 7.43552966507385,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 40,
+      "n": 1276,
+      "mean": 7.252848133790969,
+      "median": 5.540935672514621,
+      "smoothed_mean": 7.243146619706099,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 41,
+      "n": 1288,
+      "mean": 7.133194215215573,
+      "median": 5.412756348102153,
+      "smoothed_mean": 7.185551093974271,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 42,
+      "n": 1259,
+      "mean": 7.125458795720404,
+      "median": 5.555555555555558,
+      "smoothed_mean": 7.157634588897146,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 43,
+      "n": 1214,
+      "mean": 7.19336673085536,
+      "median": 5.313654493882784,
+      "smoothed_mean": 7.148826168669745,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 44,
+      "n": 1208,
+      "mean": 7.080744871421647,
+      "median": 4.914757538824573,
+      "smoothed_mean": 7.076237202517823,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 45,
+      "n": 1134,
+      "mean": 7.217365360181699,
+      "median": 5.299493209940964,
+      "smoothed_mean": 7.100604766327274,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 46,
+      "n": 1118,
+      "mean": 6.745602293689135,
+      "median": 5.016025641025644,
+      "smoothed_mean": 6.992036732094042,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 47,
+      "n": 1046,
+      "mean": 7.268734765454833,
+      "median": 5.605703259005146,
+      "smoothed_mean": 7.018087374634904,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 48,
+      "n": 997,
+      "mean": 6.614309011614754,
+      "median": 4.948172394980902,
+      "smoothed_mean": 6.920875929422553,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 49,
+      "n": 956,
+      "mean": 7.24721597507502,
+      "median": 5.287153073836648,
+      "smoothed_mean": 6.864225625366226,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 50,
+      "n": 945,
+      "mean": 6.736496792566267,
+      "median": 4.9999999999999964,
+      "smoothed_mean": 6.717425584401199,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 51,
+      "n": 890,
+      "mean": 6.393006834413293,
+      "median": 4.77022977022977,
+      "smoothed_mean": 6.671142362087167,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 52,
+      "n": 892,
+      "mean": 6.568365052290393,
+      "median": 4.586826261054936,
+      "smoothed_mean": 6.537994214317139,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 53,
+      "n": 865,
+      "mean": 6.355225216595066,
+      "median": 4.8484848484848495,
+      "smoothed_mean": 6.424419612545745,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 54,
+      "n": 827,
+      "mean": 6.625609966707041,
+      "median": 4.33646812957158,
+      "smoothed_mean": 6.260134034315389,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 55,
+      "n": 792,
+      "mean": 6.163089776550291,
+      "median": 4.194444444444445,
+      "smoothed_mean": 6.044869098420773,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 56,
+      "n": 726,
+      "mean": 5.457674689076318,
+      "median": 3.830613830613829,
+      "smoothed_mean": 6.113811569720753,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 57,
+      "n": 667,
+      "mean": 5.4210934219769795,
+      "median": 4.166666666666666,
+      "smoothed_mean": 5.989778817963792,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 58,
+      "n": 567,
+      "mean": 6.953516623999955,
+      "median": 4.202508960573478,
+      "smoothed_mean": 6.003328537518214,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 59,
+      "n": 515,
+      "mean": 6.148845112085153,
+      "median": 4.074074074074078,
+      "smoothed_mean": 6.300265425733245,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 60,
+      "n": 455,
+      "mean": 6.378708394875792,
+      "median": 4.42797166098137,
+      "smoothed_mean": 6.409770970626903,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 61,
+      "n": 440,
+      "mean": 6.887320443135777,
+      "median": 4.697884697884696,
+      "smoothed_mean": 6.4240317749599,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 62,
+      "n": 393,
+      "mean": 5.468510756248613,
+      "median": 3.190514351350996,
+      "smoothed_mean": 6.4278610442585435,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 63,
+      "n": 348,
+      "mean": 7.38384791195678,
+      "median": 4.338893319156476,
+      "smoothed_mean": 6.381684554754873,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 64,
+      "n": 314,
+      "mean": 5.996471086271556,
+      "median": 4.166666666666666,
+      "smoothed_mean": 6.240659219021446,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 65,
+      "n": 273,
+      "mean": 6.046892220406379,
+      "median": 4.865037451244348,
+      "smoothed_mean": 6.544958470741834,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 66,
+      "n": 250,
+      "mean": 6.3814517991558715,
+      "median": 4.941176470588234,
+      "smoothed_mean": 6.308614183053213,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 67,
+      "n": 206,
+      "mean": 6.822338409668715,
+      "median": 4.761904761904759,
+      "smoothed_mean": 6.56140385006096,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 68,
+      "n": 184,
+      "mean": 6.555496973724776,
+      "median": 3.7037037037037073,
+      "smoothed_mean": 6.813915788038615,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 69,
+      "n": 173,
+      "mean": 7.328941616469239,
+      "median": 3.8734896943852126,
+      "smoothed_mean": 6.606899384848267,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 70,
+      "n": 148,
+      "mean": 7.251959914255733,
+      "median": 4.389008484234516,
+      "smoothed_mean": 6.41833435357142,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 71,
+      "n": 125,
+      "mean": 4.5644621057360855,
+      "median": 3.333333333333336,
+      "smoothed_mean": 5.988345254548618,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 72,
+      "n": 100,
+      "mean": 5.674179047657406,
+      "median": 4.211137514913256,
+      "smoothed_mean": 5.567477845970607,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 73,
+      "n": 92,
+      "mean": 3.7107786680460957,
+      "median": 3.333333333333336,
+      "smoothed_mean": 5.132253105781753,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 74,
+      "n": 85,
+      "mean": 5.993593441541093,
+      "median": 3.888888888888886,
+      "smoothed_mean": 5.663530345063685,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 75,
+      "n": 67,
+      "mean": 6.241850128920257,
+      "median": 2.678571428571426,
+      "smoothed_mean": 5.565197097612337,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 76,
+      "n": 53,
+      "mean": 7.772690633880215,
+      "median": 3.7037037037037055,
+      "smoothed_mean": 5.952833813364702,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 77,
+      "n": 42,
+      "mean": 4.895194615858094,
+      "median": 1.7551311074861777,
+      "smoothed_mean": 5.929474660835664,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 78,
+      "n": 38,
+      "mean": 3.9828278468052254,
+      "median": 3.0555555555555554,
+      "smoothed_mean": 5.070275260028033,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 79,
+      "n": 32,
+      "mean": 5.891747719872721,
+      "median": 6.0131535131535125,
+      "smoothed_mean": 4.120247248502712,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 80,
+      "n": 29,
+      "mean": 0.9034219920421172,
+      "median": 0.0,
+      "smoothed_mean": 3.6900755047718596,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 81,
+      "n": 22,
+      "mean": 4.541795666188861,
+      "median": 0.0,
+      "smoothed_mean": 3.7398183165768577,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 82,
+      "n": 17,
+      "mean": 2.5428407069773296,
+      "median": 0.0,
+      "smoothed_mean": 4.061432709492471,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 83,
+      "n": 12,
+      "mean": 5.081390831390832,
+      "median": 4.015151515151512,
+      "smoothed_mean": 3.853207190979583,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 84,
+      "n": 7,
+      "mean": 5.137921659660792,
+      "median": 5.555555555555558,
+      "smoothed_mean": 3.8144230577404157,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 85,
+      "n": 5,
+      "mean": 4.032436162870947,
+      "median": 0.0,
+      "smoothed_mean": 3.082247930178184,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 86,
+      "n": 1,
+      "mean": 0.0,
+      "median": 0.0,
+      "smoothed_mean": 4.025321843699765,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 87,
+      "n": 1,
+      "mean": 4.72222222222222,
+      "median": 4.72222222222222,
+      "smoothed_mean": 3.7728235304828734,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 88,
+      "n": 1,
+      "mean": 4.72222222222222,
+      "median": 4.72222222222222,
+      "smoothed_mean": 4.5195988161826675,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    },
+    {
+      "age": 90,
+      "n": 1,
+      "mean": 0.0,
+      "median": 0.0,
+      "smoothed_mean": 3.2896250287554643,
+      "smoothing_window": "centered_age_window_pm2_or_pm5_if_total_n_lt_100"
+    }
+  ]
+}

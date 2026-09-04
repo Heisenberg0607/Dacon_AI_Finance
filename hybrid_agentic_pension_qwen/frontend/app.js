@@ -132,6 +132,13 @@ function setOperationType(op){
   $('provider').required = !isDB;
   $('productName').required = !isDB;
 
+  const personalField = $('personalContributionField');
+  const personalInput = $('personalAdditionalContribution');
+  if(personalField) personalField.classList.toggle('is-hidden', op !== 'DC');
+  if(personalInput) personalInput.disabled = op !== 'DC' || isDB;
+  if($('annualContributionLabel')) $('annualContributionLabel').textContent = op === 'DC' ? '연간 회사 부담금' : '연간 개인 납입액';
+  if($('dcIrpTitle')) $('dcIrpTitle').textContent = `${op}형 분석 정보`;
+
   if(!isDB){
     $('dcIrpTypeChip').textContent = op;
     fillProducts();
@@ -226,7 +233,7 @@ function payload(){
   return {
     ...common,
     current_savings:Number($('currentSavings').value),
-    annual_contribution:Number($('annualContribution').value),
+    annual_contribution:Number($('annualContribution').value) + (op === 'DC' ? Number($('personalAdditionalContribution').value || 0) : 0),
     provider:$('provider').value,
     product_name:$('productName').value,
     investment_type:$('investmentType').value,

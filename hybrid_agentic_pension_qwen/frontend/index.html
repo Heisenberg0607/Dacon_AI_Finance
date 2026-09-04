@@ -123,7 +123,7 @@
 
         <div id="dcIrpFields" class="conditional-section">
           <div class="conditional-title">
-            <div><b>DC / IRP 분석 정보</b><small>적립금·납입액·가입 상품을 바탕으로 운용 전략을 분석합니다.</small></div>
+            <div><b id="dcIrpTitle">DC형 분석 정보</b><small>적립금·납입액·가입 상품을 바탕으로 운용 전략을 분석합니다.</small></div>
             <span id="dcIrpTypeChip" class="type-chip">DC</span>
           </div>
           <div class="form-grid">
@@ -133,8 +133,13 @@
             </label>
 
             <label class="field">
-              <span>연간 납입액</span>
+              <span id="annualContributionLabel">연간 납입액</span>
               <div class="money-input"><input id="annualContribution" type="number" min="0" value="360" required /><em>만원</em></div>
+            </label>
+
+            <label class="field" id="personalContributionField">
+              <span>본인 추가 납입액 <small class="optional-tag">(선택사항)</small></span>
+              <div class="money-input"><input id="personalAdditionalContribution" type="number" min="0" value="" placeholder="0" /><em>만원</em></div>
             </label>
 
             <label class="field">

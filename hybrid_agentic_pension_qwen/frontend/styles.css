@@ -173,6 +173,13 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   opacity:1;
 }
 
+#personalAdditionalContribution::placeholder{
+  color:#62736b;
+  font-size:18px;
+  font-weight:850;
+  letter-spacing:-.025em;
+}
+
 .field select option{
   font-size:15px;
   font-weight:700;

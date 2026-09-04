@@ -1,0 +1,233 @@
+{
+  "model_name": "salary_growth_catboost_m3",
+  "model_version": "2026-09-04-m3-rmse-catboost",
+  "created_at": "2026-09-04T20:49:22",
+  "artifact_files": {
+    "model": "export\\catboost_m3.cbm",
+    "metadata": "export\\metadata.json",
+    "occupation_categories": "export\\occupation_categories.json",
+    "age_growth_curve": "export\\age_growth_curve.json",
+    "smoke_test": "export\\smoke_test.json"
+  },
+  "features": {
+    "order": [
+      "log_wage_t",
+      "age",
+      "occupation"
+    ],
+    "numeric": [
+      "log_wage_t",
+      "age"
+    ],
+    "categorical": [
+      "occupation"
+    ],
+    "full_nested_reference_order": [
+      "age",
+      "log_wage_t",
+      "main_career",
+      "main_tenure",
+      "industry",
+      "occupation",
+      "employment_type",
+      "company_size_final"
+    ]
+  },
+  "wage_input": {
+    "raw_source_column_mapping_confirmed_from_code": "p{}1642 -> wage",
+    "model_source_column_priority": [
+      "wage_model_v2",
+      "wage_model",
+      "wage"
+    ],
+    "confirmed_meaning_from_notebook_code": "monthly wage",
+    "confirmed_unit_from_notebook_code": "만원",
+    "model_training_wage_column": "wage_t",
+    "log_feature_formula": "log_wage_t = np.log1p(wage_t)",
+    "ui_annual_salary_manwon_to_model": "monthly_wage_manwon = annual_salary_manwon / 12; log_wage_t = np.log1p(monthly_wage_manwon)",
+    "ui_monthly_salary_manwon_to_model": "monthly_wage_manwon = monthly_salary_manwon; log_wage_t = np.log1p(monthly_wage_manwon)"
+  },
+  "target": {
+    "name": "target_avg_wage_growth_t_to_t3",
+    "horizon_years": 3,
+    "unit": "percentage points",
+    "formula": "target = mean([wage_t1 / wage_t - 1, wage_t2 / wage_t1 - 1, wage_t3 / wage_t2 - 1]) * 100",
+    "components": {
+      "growth_1y_0_1": "wage_t1 / wage_t - 1",
+      "growth_1y_1_2": "wage_t2 / wage_t1 - 1",
+      "growth_1y_2_3": "wage_t3 / wage_t2 - 1"
+    },
+    "winsorization": "global 1st/99th percentile clipping on target_avg_wage_growth_t_to_t3 after target creation",
+    "is_cagr": false,
+    "target_type": "arithmetic mean of three one-year simple wage growth rates",
+    "prediction_transform": "none; CatBoost prediction is already in %p target scale",
+    "projection_warning": "This target is not CAGR. Do not directly compound it as salary * (1 + g) ** years for long-term projection without a projection-specific method or a separately trained CAGR target model."
+  },
+  "data_split": {
+    "train": {
+      "rule": "year <= 2018",
+      "rows_after_m3_preprocessing": 37741
+    },
+    "validation": {
+      "rule": "2019 <= year <= 2020",
+      "rows_after_m3_preprocessing": 11929
+    },
+    "test": {
+      "rule": "year == 2021, representing 2021 -> 2024",
+      "rows_after_m3_preprocessing": 6325
+    }
+  },
+  "metrics": {
+    "train": {
+      "mae_pp": 7.155745274819448,
+      "rmse_pp": 10.084951524447293,
+      "r2": 0.26281859662084206,
+      "n": 37741
+    },
+    "validation": {
+      "mae_pp": 7.006750112710869,
+      "rmse_pp": 10.37899229948878,
+      "r2": 0.2070820235826072,
+      "n": 11929
+    },
+    "test": {
+      "mae_pp": 7.064063742908314,
+      "rmse_pp": 10.605349485558321,
+      "r2": 0.1962428736705808,
+      "n": 6325
+    }
+  },
+  "catboost": {
+    "params": {
+      "nan_mode": "Min",
+      "eval_metric": "RMSE",
+      "combinations_ctr": [
+        "Borders:CtrBorderCount=15:CtrBorderType=Uniform:TargetBorderCount=1:TargetBorderType=MinEntropy:Prior=0/1:Prior=0.5/1:Prior=1/1",
+        "Counter:CtrBorderCount=15:CtrBorderType=Uniform:Prior=0/1"
+      ],
+      "iterations": 3000,
+      "sampling_frequency": "PerTree",
+      "fold_permutation_block": 0,
+      "leaf_estimation_method": "Newton",
+      "od_pval": 0,
+      "random_score_type": "NormalWithModelSizeDecrease",
+      "counter_calc_method": "SkipTest",
+      "grow_policy": "SymmetricTree",
+      "penalties_coefficient": 1,
+      "boosting_type": "Plain",
+      "model_shrink_mode": "Constant",
+      "feature_border_type": "GreedyLogSum",
+      "ctr_leaf_count_limit": 18446744073709551615,
+      "bayesian_matrix_reg": 0.10000000149011612,
+      "one_hot_max_size": 2,
+      "eval_fraction": 0,
+      "force_unit_auto_pair_weights": false,
+      "l2_leaf_reg": 5,
+      "random_strength": 1,
+      "od_type": "Iter",
+      "rsm": 1,
+      "boost_from_average": true,
+      "max_ctr_complexity": 4,
+      "model_size_reg": 0.5,
+      "simple_ctr": [
+        "Borders:CtrBorderCount=15:CtrBorderType=Uniform:TargetBorderCount=1:TargetBorderType=MinEntropy:Prior=0/1:Prior=0.5/1:Prior=1/1",
+        "Counter:CtrBorderCount=15:CtrBorderType=Uniform:Prior=0/1"
+      ],
+      "pool_metainfo_options": {
+        "tags": {}
+      },
+      "subsample": 0.800000011920929,
+      "use_best_model": true,
+      "od_wait": 200,
+      "random_seed": 42,
+      "depth": 7,
+      "ctr_target_border_count": 1,
+      "posterior_sampling": false,
+      "has_time": false,
+      "store_all_simple_ctr": false,
+      "border_count": 254,
+      "classes_count": 0,
+      "auto_class_weights": "None",
+      "sparse_features_conflict_fraction": 0,
+      "leaf_estimation_backtracking": "AnyImprovement",
+      "best_model_min_trees": 1,
+      "model_shrink_rate": 0,
+      "min_data_in_leaf": 1,
+      "loss_function": "RMSE",
+      "learning_rate": 0.029999999329447743,
+      "score_function": "Cosine",
+      "task_type": "CPU",
+      "leaf_estimation_iterations": 1,
+      "bootstrap_type": "MVS",
+      "max_leaves": 128,
+      "permutation_count": 4
+    },
+    "feature_names_": [
+      "log_wage_t",
+      "age",
+      "occupation"
+    ],
+    "best_iteration": 1084,
+    "tree_count": 1085,
+    "cat_feature_indices": [
+      2
+    ],
+    "cat_features": [
+      "occupation"
+    ]
+  },
+  "trace_checks": {
+    "raw_wage_mapping_p1642_to_wage": true,
+    "wage_model_v2_priority": true,
+    "wage_model_priority": true,
+    "raw_wage_fallback": true,
+    "log_wage_t_formula": true,
+    "growth_0_1_formula": true,
+    "growth_1_2_formula": true,
+    "growth_2_3_formula": true,
+    "target_mean_times_100": true,
+    "target_clip_quantile_1_99": true,
+    "wage_unit_manwon_in_code": true,
+    "wage_meaning_monthly_in_code": true
+  },
+  "occupation_categories": {
+    "source": "train_df after M3 preprocessing",
+    "count": 153,
+    "file": "export\\occupation_categories.json"
+  },
+  "age_growth_curve": {
+    "source": "train_df only",
+    "file": "export\\age_growth_curve.json",
+    "validation_or_test_used": false,
+    "smoothing_method": {
+      "method": "weighted centered moving average by age",
+      "primary_window_years": 2,
+      "fallback_window_years": 5,
+      "fallback_condition": "total sample size in +/-2 age window < 100",
+      "weights": "age-level n",
+      "validation_or_test_used": false
+    }
+  },
+  "smoke_test": {
+    "model_file_exists": true,
+    "metadata_file_exists": false,
+    "occupation_categories_file_exists": true,
+    "age_growth_curve_file_exists": true,
+    "original_vs_reloaded_prediction": {
+      "rows": 100,
+      "max_abs_diff": 0.0,
+      "mean_abs_diff": 0.0,
+      "identical_with_atol_1e_12": true
+    },
+    "sample_prediction": {
+      "input": {
+        "age": 32,
+        "current_annual_salary_manwon": 5000,
+        "occupation": "-1.0"
+      },
+      "converted_monthly_wage_manwon": 416.6666666666667,
+      "converted_log_wage_t": 6.034683666227958,
+      "prediction_avg_annual_growth_pp": 2.348135859726894
+    }
+  }
+}
