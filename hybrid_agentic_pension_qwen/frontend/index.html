@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>깨움 KKAEUM</title>
-  <link rel="stylesheet" href="/static/styles.css?v=32" />
+  <link rel="stylesheet" href="/static/styles.css?v=33" />
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -288,6 +288,12 @@
             <p class="mini-kicker">현재 분석 대상</p>
             <h4 id="currentProduct">-</h4>
             <p id="productAnalysis"></p>
+            <!-- 분석 근거가 된 상품설명서 원문. 종이 보고서에는 링크가 무의미하므로 인쇄에서 뺀다. -->
+            <a id="sourcePdfBtn" class="source-pdf-btn no-print hidden" href="#">
+              <span aria-hidden="true">↓</span>
+              <b>원문 PDF 다운로드</b>
+              <small id="sourcePdfName"></small>
+            </a>
           </div>
         </section>
 
@@ -363,6 +369,6 @@
   </main>
 
   <footer>깨움 KKAEUM · 당신의 AI 연금분석 에이전트</footer>
-  <script src="/static/app.js?v=39"></script>
+  <script src="/static/app.js?v=40"></script>
 </body>
 </html>

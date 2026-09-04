@@ -707,6 +707,18 @@ function renderTiming(timing){
   $('reportGeneratedAt').parentElement.title = '';
 }
 
+// v31: 분석 근거가 된 상품설명서 원문을 그대로 받아볼 수 있게 한다.
+// 서버가 Content-Disposition: attachment로 내려주므로 평범한 링크면 충분하다.
+// fileId가 없으면(DB형이거나 원문을 못 찾은 경우) 버튼 자체를 숨긴다. 눌러야 없다는 걸
+// 알게 되는 버튼보다 없는 편이 낫다.
+function setSourcePdfLink(fileId, filename){
+  const btn=$('sourcePdfBtn');
+  if(!fileId){ btn.classList.add('hidden'); btn.removeAttribute('href'); return; }
+  btn.href=`/api/source-document?file_id=${encodeURIComponent(fileId)}`;
+  $('sourcePdfName').textContent=filename || '';
+  btn.classList.remove('hidden');
+}
+
 function renderReport(r){
   const u=r.user, f=r.finance, mc=r.monte_carlo, o=r.optimizer, rep=r.report, rec=r.recommendation;
   const isDB = u.operation_type === 'DB';
@@ -763,12 +775,15 @@ function renderReport(r){
   if(isDB){
     $('currentProduct').textContent='DB 급여 분석';
     $('productAnalysis').textContent=`개인 운용상품 대신 현재 연소득, 근속연수, 임금상승률을 이용해 예상 DB 퇴직급여를 계산했습니다. ${f.calculation_note||''}`;
+    // DB형은 개인 선택 상품이 없어 내려받을 원문도 없다.
+    setSourcePdfLink(null, null);
   }else{
     $('currentProduct').textContent=u.product_name || '-';
     const ext=r.product_extraction||{};
     const alloc=(ext.asset_allocation||[]).map(x=>`${x.component_name} ${Number(x.weight_pct||0).toFixed(1).replace('.0','')}%`).join(' · ');
     const extractionLine=ext.source_filename ? `\n\nPDF 구조화: ${ext.source_filename}${alloc?` / ${alloc}`:''}` : '';
     $('productAnalysis').textContent=(rep.product_analysis || rec.product_analysis || '') + extractionLine;
+    setSourcePdfLink(ext.source_document_available ? ext.source_file_id : null, ext.source_filename);
   }
 
   $('simulationComment').textContent=rep.simulation_comment || '';

@@ -564,3 +564,24 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 .lookup-note a{color:var(--info);font-weight:800;text-decoration:underline;text-underline-offset:2px}
 .lookup-note a:hover{color:var(--text)}
 .lookup-note a:focus-visible{outline:2px solid var(--info);outline-offset:2px;border-radius:3px}
+
+/* v31: 분석 근거가 된 상품설명서 원문 다운로드 */
+/* 미니 패널 본문과 구분되도록 위쪽 경계선을 두고, 파일명은 길어질 수 있어 줄바꿈을 허용한다. */
+.source-pdf-btn{
+  display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+  margin-top:14px;padding-top:13px;border-top:1px solid var(--line);
+  color:var(--accent);text-decoration:none;
+}
+.source-pdf-btn>span{
+  flex:none;width:20px;height:20px;border-radius:6px;
+  background:var(--accent-soft);color:var(--accent);
+  display:grid;place-items:center;font-size:11px;font-weight:900;
+}
+.source-pdf-btn b{font-size:12px;font-weight:800}
+.source-pdf-btn small{
+  flex-basis:100%;padding-left:28px;color:var(--muted);font-size:10px;line-height:1.5;
+  overflow-wrap:anywhere;
+}
+.source-pdf-btn:hover b{text-decoration:underline;text-underline-offset:2px}
+.source-pdf-btn:hover>span{background:var(--accent);color:#ffffff}
+.source-pdf-btn:focus-visible{outline:2px solid var(--info);outline-offset:3px;border-radius:6px}
