@@ -72,7 +72,7 @@ CHAT_TOOL_DEFINITIONS = [
                 '납입액·자산배분·은퇴나이를 바꿨을 때의 결과를 Python 금융엔진으로 재계산한다. '
                 '가정을 바꾼 질문에는 반드시 이 도구를 쓰고 직접 계산하지 마라. '
                 '금액 단위는 내부 계산 스케일인 만원이다. 예: 연 1,200만원 납입 → annual_contribution=1200. '
-                'DB형은 retirement_age와 wage_growth_rate만 적용된다.'
+                'DB형은 retirement_age와 최초 3년 wage_growth_rate를 반영하되, 은퇴까지는 CatBoost M3 salary projector와 age curve 보정으로 재계산된다.'
             ),
             'parameters': {
                 'type': 'object',
@@ -80,7 +80,7 @@ CHAT_TOOL_DEFINITIONS = [
                     'annual_contribution': {'type': 'number', 'description': 'DC/IRP 연간 납입액, 만원 단위'},
                     'safe_ratio': {'type': 'number', 'minimum': 0, 'maximum': 1, 'description': 'DC/IRP 안전자산 비중 0~1'},
                     'retirement_age': {'type': 'integer', 'description': '변경할 은퇴 나이'},
-                    'wage_growth_rate': {'type': 'number', 'description': 'DB형 임금상승률 %'},
+                    'wage_growth_rate': {'type': 'number', 'description': 'DB형 최초 3년 예상 연평균 임금상승률 %'},
                 },
                 'additionalProperties': False,
             },

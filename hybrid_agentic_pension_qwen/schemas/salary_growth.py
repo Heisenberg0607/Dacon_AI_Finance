@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 class SalaryGrowthPredictRequest(BaseModel):
     current_age: int = Field(ge=17, le=90)
     current_salary: float = Field(gt=0, description='Current annual salary, in manwon')
-    occupation: str = Field(min_length=1, max_length=40)
+    occupation: str = Field(default='', max_length=120)
 
 
 class SalaryGrowthPredictResponse(BaseModel):
@@ -19,6 +19,7 @@ class SalaryGrowthPredictResponse(BaseModel):
     target_definition: str | None = None
     target_type: str | None = None
     projection_supported: bool
+    occupation_mapping: dict
     input_features: dict
 
 
@@ -38,9 +39,12 @@ class SalaryProjectionBlock(BaseModel):
     block_years: int
     start_salary: float
     catboost_growth: float
+    raw_catboost_growth: float
+    growth_source: str
     age_curve_growth: float
     age_curve_matched_age: int
     age_curve_clamped: bool
+    years_from_now: int
     model_weight: float
     final_growth: float
     end_salary: float
@@ -61,6 +65,7 @@ class SalaryGrowthProjectResponse(BaseModel):
     projection_supported: bool
     blending_validated: bool
     provisional: bool
+    blending_config: dict
     projection_warning: str | None = None
     blocks: list[SalaryProjectionBlock]
     salary_path: list[SalaryPathPoint]

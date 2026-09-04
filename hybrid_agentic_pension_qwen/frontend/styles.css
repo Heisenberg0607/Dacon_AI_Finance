@@ -131,6 +131,15 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 }
 .inline-control{display:flex;gap:8px;align-items:stretch}
 .inline-control .grow{flex:1;min-width:0}
+.inline-field-label{
+  display:flex;
+  align-items:center;
+  flex:0 0 auto;
+  min-height:52px;
+  color:#6b7280;
+  font-size:13px;
+  font-weight:800;
+}
 .estimate-btn{
   flex:0 0 auto;
   min-height:52px;
@@ -159,11 +168,16 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 .derived-value small{font-size:9px;color:var(--muted);text-align:right}
 .salary-history-field{grid-column:1/-1}
 .salary-history-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.common-job-field,
+.common-wage-growth-field{
+  grid-column:1/-1;
+}
 
 @media(max-width:720px){
   .operation-buttons{grid-template-columns:repeat(3,1fr)}
   .salary-history-grid{grid-template-columns:1fr}
   .inline-control{flex-direction:column}
+  .inline-field-label{min-height:auto}
   .estimate-btn{width:100%}
   .derived-value{align-items:flex-start;flex-direction:column}
 }
@@ -290,14 +304,6 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   text-align:right;
 }
 
-#wageGrowthHint{
-  font-size:13px;
-  line-height:1.55;
-  font-weight:650;
-  color:#8fa39a;
-}
-
-
 /* v12: pipeline line break + DB field order */
 .hero-pipeline{
   line-height:1.85;
@@ -307,13 +313,8 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
   padding-left:1.25em;
 }
 
-.wage-growth-field{
-  grid-column:1/-1;
-}
-
 @media(max-width:720px){
   .pipeline-continuation{padding-left:0}
-  .wage-growth-field{grid-column:auto}
 }
 
 /* v15: extracted product details preserve line breaks */

@@ -155,10 +155,6 @@ function syncRiskFromProduct(){
 function toggleFieldControls(container, enabled){
   if(!container) return;
   container.querySelectorAll('input,select,button').forEach(el=>{
-    if(el.id === 'estimateWageBtn'){
-      el.disabled = !enabled;
-      return;
-    }
     el.disabled = !enabled;
   });
 }
@@ -212,48 +208,48 @@ function updateAdditionalTenure(){
 $('age').addEventListener('input', updateAdditionalTenure);
 $('retirementAge').addEventListener('input', updateAdditionalTenure);
 
-function getSalaryHistory(includeCurrent=true){
-  const ids=['salary3YearsAgo','salary2YearsAgo','salary1YearAgo'];
-  const vals=ids.map(id=>Number($(id).value)).filter(v=>Number.isFinite(v)&&v>0);
-  if(includeCurrent && vals.length) vals.push(Number($('annualIncome').value));
-  return vals;
+function nullableNumber(id){
+  const el=$(id);
+  if(!el) return null;
+  const raw=el.value;
+  if(raw === '' || raw == null) return null;
+  const n=Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 async function previewWageEstimate(){
-  if($('operationType').value !== 'DB') return;
   const btn=$('estimateWageBtn');
+  if(!btn) return;
   const original=btn.textContent;
   btn.disabled=true;
   btn.textContent='추정 중...';
   try{
-    const data=payload();
-    data.wage_growth_rate=null;
-    const res=await fetch('/api/estimate-wage-growth',{
+    const data={
+      current_age:Number($('age').value),
+      current_salary:Number($('annualIncome').value),
+      occupation:$('currentJob').value.trim(),
+    };
+    const res=await fetch('/api/salary-growth/predict',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(data),
     });
     if(!res.ok) throw new Error(await res.text());
     const estimate=await res.json();
-    $('wageGrowthRate').value='';
-    $('wageGrowthRate').placeholder=`자동 추정 약 ${Number(estimate.rate_pct).toFixed(2)}%`;
-    $('wageGrowthHint').textContent=`깨움 자동 추정: 약 ${Number(estimate.rate_pct).toFixed(2)}% · ${estimate.explanation}`;
+    const mapping=estimate.occupation_mapping || {};
+    $('wageGrowthRate').value=Number(estimate.predicted_growth_rate).toFixed(2);
+    $('wageGrowthHint').textContent=mapping.fallback
+      ? `깨움 AI가 현재 나이·연소득·직종을 기반으로 추정했습니다. 원하면 직접 수정할 수 있습니다. 이 값은 은퇴까지 고정 적용되는 상수가 아니라 최초 3년 AI 추정값입니다. 직종 매핑 불확실, 기타(-1.0) 기준.`
+      : `깨움 AI가 현재 나이·연소득·직종을 기반으로 추정했습니다. 원하면 직접 수정할 수 있습니다. 이 값은 은퇴까지 고정 적용되는 상수가 아니라 최초 3년 AI 추정값입니다. 직종 코드 ${mapping.category}.`;
   }catch(err){
     console.error('임금상승률 추정 실패:',err);
-    $('wageGrowthHint').textContent='자동 추정에 실패했습니다. 입력값을 확인하거나 직접 임금상승률을 입력해주세요.';
+    $('wageGrowthHint').textContent='자동 추정에 실패했습니다. 입력값을 확인해주세요.';
   }finally{
     btn.disabled=false;
     btn.textContent=original;
   }
 }
-$('estimateWageBtn').addEventListener('click', previewWageEstimate);
-
-function nullableNumber(id){
-  const raw=$(id).value;
-  if(raw === '' || raw == null) return null;
-  const n=Number(raw);
-  return Number.isFinite(n) ? n : null;
-}
+if($('estimateWageBtn')) $('estimateWageBtn').addEventListener('click', previewWageEstimate);
 
 function payload(){
   const op = $('operationType').value;
@@ -275,22 +271,23 @@ function payload(){
       investment_type:null,
       current_tenure_years:nullableNumber('currentTenureYears'),
       wage_growth_rate:nullableNumber('wageGrowthRate'),
-      industry_job:$('industryJob').value.trim() || null,
-      company_size:$('companySize').value || null,
-      salary_history:getSalaryHistory(true),
+      industry_job:$('currentJob').value.trim() || null,
+      company_size:null,
+      salary_history:[],
     };
   }
 
   return {
     ...common,
     current_savings:Number($('currentSavings').value),
-    annual_contribution:Number($('annualContribution').value) + (op === 'DC' ? Number($('personalAdditionalContribution').value || 0) : 0),
+    annual_contribution:Number($('annualContribution').value),
+    personal_additional_contribution:op === 'DC' ? Number($('personalAdditionalContribution').value || 0) : null,
     provider:$('provider').value,
     product_name:$('productName').value,
     investment_type:$('investmentType').value,
     current_tenure_years:null,
-    wage_growth_rate:null,
-    industry_job:null,
+    wage_growth_rate:op === 'DC' ? nullableNumber('wageGrowthRate') : null,
+    industry_job:op === 'DC' ? $('currentJob').value.trim() || null : null,
     company_size:null,
     salary_history:[],
   };
@@ -741,7 +738,7 @@ function renderReport(r){
     $('mCurrentSmall').textContent=`추가 ${f.additional_tenure_years}년 자동 계산`;
     $('mFutureLabel').textContent='예상 DB 퇴직급여';
     $('mFuture').textContent=fmtMoney(f.estimated_db_benefit ?? f.future_asset);
-    $('mFutureSmall').textContent=`임금상승률 ${Number(f.wage_growth_rate_pct||0).toFixed(2)}% 가정`;
+    $('mFutureSmall').textContent=`최초 3년 ${Number(f.first_3y_wage_growth_rate_pct ?? f.wage_growth_rate_pct ?? 0).toFixed(2)}% · 이후 재귀 예측`;
     $('mTargetLabel').textContent='목표 은퇴자산';
     $('mTarget').textContent=fmtMoney(f.target_retirement_asset);
     $('mTargetSmall').textContent='4% 인출률 계산값 · 실제 원화 숫자';
@@ -767,7 +764,7 @@ function renderReport(r){
     ['현재 근속연수',`${Number(pf.current_tenure_years||0).toFixed(1).replace('.0','')}년`],
     ['예상 추가 근속',`${pf.expected_additional_tenure_years}년 (자동)`],
     ['예상 총 근속',`${Number(pf.total_expected_tenure_years||0).toFixed(1).replace('.0','')}년`],
-    ['예상 임금상승률',`${Number(pf.wage_growth?.rate_pct||0).toFixed(2)}%`],
+    ['향후 3년 예상 연평균 임금상승률',`${Number(f.first_3y_wage_growth_rate_pct ?? pf.wage_growth?.rate_pct ?? 0).toFixed(2)}%`],
     ['AI 진단',pf.diagnosis_hint],
   ] : [
     ['은퇴까지',`${pf.years_to_retirement}년`],
@@ -781,7 +778,7 @@ function renderReport(r){
 
   if(isDB){
     $('currentProduct').textContent='DB 급여 분석';
-    $('productAnalysis').textContent=`개인 운용상품 대신 현재 연소득, 근속연수, 임금상승률을 이용해 예상 DB 퇴직급여를 계산했습니다. ${f.calculation_note||''}`;
+    $('productAnalysis').textContent=`개인 운용상품 대신 현재 연소득, 근속연수, CatBoost M3 임금 예측과 age curve 보정을 이용해 예상 DB 퇴직급여를 계산했습니다. ${f.calculation_note||''}`;
     // DB형은 개인 선택 상품이 없어 내려받을 원문도 없다.
     setSourcePdfLink(null, null);
   }else{
@@ -816,7 +813,7 @@ function renderProjection(r){
   $('mProbability').textContent=fmtPct(mc.success_probability_pct,1);
   if(isDB){
     $('mFuture').textContent=fmtMoney(f.estimated_db_benefit ?? f.future_asset);
-    $('mFutureSmall').textContent=`임금상승률 ${Number(f.wage_growth_rate_pct||0).toFixed(2)}% 가정`;
+    $('mFutureSmall').textContent=`최초 3년 ${Number(f.first_3y_wage_growth_rate_pct ?? f.wage_growth_rate_pct ?? 0).toFixed(2)}% · 이후 재귀 예측`;
     $('allocationBars').innerHTML='<div class="db-allocation-note">DB형은 개인 자산배분 최적화 대신 예상 DB 급여와 희망 노후소득의 Gap을 분석합니다.</div>';
   }else{
     $('mFuture').textContent=fmtMoney(f.future_asset);

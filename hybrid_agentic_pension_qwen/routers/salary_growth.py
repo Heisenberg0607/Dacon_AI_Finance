@@ -9,7 +9,7 @@ from schemas.salary_growth import (
     SalaryGrowthProjectResponse,
 )
 from services.salary_growth.predictor import SalaryGrowthArtifactError, get_salary_growth_predictor
-from services.salary_growth.projector import SalaryGrowthProjector
+from services.salary_growth.projector import SalaryGrowthProjectionUnsupported, SalaryGrowthProjector
 
 
 router = APIRouter(prefix='/api/salary-growth', tags=['salary-growth'])
@@ -32,6 +32,8 @@ def predict_salary_growth(request: SalaryGrowthPredictRequest):
             current_salary=request.current_salary,
             occupation=request.occupation,
         )
+    except SalaryGrowthProjectionUnsupported as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SalaryGrowthArtifactError as exc:
@@ -48,6 +50,8 @@ def project_salary_growth(request: SalaryGrowthProjectRequest):
             current_salary=request.current_salary,
             occupation=request.occupation,
         )
+    except SalaryGrowthProjectionUnsupported as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SalaryGrowthArtifactError as exc:

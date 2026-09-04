@@ -4,8 +4,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import app
+from backend.models import UserPensionInput
+from backend.tools import finance_engine_tool
 from services.salary_growth.predictor import get_salary_growth_predictor
-from services.salary_growth.projector import SalaryGrowthProjector
+from services.salary_growth.projector import SalaryGrowthProjectionUnsupported, SalaryGrowthProjector
 
 
 @pytest.fixture(scope='module')
@@ -27,6 +29,7 @@ def test_predict_supported_occupation_matches_smoke_test(predictor):
     assert result['prediction_horizon_years'] == 3
     assert result['predicted_growth_rate'] == pytest.approx(expected, abs=1e-6)
     assert result['projection_supported'] is False
+    assert result['occupation_mapping']['category'] == '-1.0'
 
 
 def test_prediction_is_deterministic_after_reload(predictor):
@@ -36,9 +39,17 @@ def test_prediction_is_deterministic_after_reload(predictor):
     assert reloaded['predicted_growth_rate'] == pytest.approx(first['predicted_growth_rate'], abs=1e-12)
 
 
-def test_unsupported_occupation_errors(predictor):
-    with pytest.raises(ValueError):
-        predictor.predict(current_age=32, current_salary=5000, occupation='not-a-category')
+def test_unknown_natural_language_occupation_falls_back(predictor):
+    result = predictor.predict(current_age=32, current_salary=5000, occupation='not-a-category')
+    assert result['occupation_mapping']['category'] == '-1.0'
+    assert result['occupation_mapping']['fallback'] is True
+
+
+def test_natural_language_occupation_keyword_mapping(predictor):
+    result = predictor.predict(current_age=32, current_salary=5000, occupation='금융 데이터 분석가')
+    assert result['occupation_mapping']['source'] == 'keyword_mapping'
+    assert result['occupation_mapping']['category'] in predictor.occupation_categories
+    assert result['occupation_mapping']['fallback'] is False
 
 
 def test_current_salary_validation(predictor):
@@ -46,21 +57,14 @@ def test_current_salary_validation(predictor):
         predictor.predict(current_age=32, current_salary=0, occupation='-1.0')
 
 
-def test_projection_blocks_and_final_short_block(predictor):
-    result = SalaryGrowthProjector(predictor).project(
-        current_age=32,
-        retirement_age=60,
-        current_salary=5000,
-        occupation='-1.0',
-    )
-    assert result['projection_supported'] is False
-    assert result['blending_validated'] is False
-    assert result['provisional'] is True
-    assert result['blocks'][0]['block_years'] == 3
-    assert result['blocks'][-1]['block_years'] == 1
-    assert result['blocks'][-1]['end_age'] == 60
-    assert result['salary_path'][0] == {'age': 32, 'salary': 5000.0}
-    assert result['salary_path'][-1]['age'] == 60
+def test_projection_rejects_non_cagr_target(predictor):
+    with pytest.raises(SalaryGrowthProjectionUnsupported):
+        SalaryGrowthProjector(predictor).project(
+            current_age=32,
+            retirement_age=60,
+            current_salary=5000,
+            occupation='-1.0',
+        )
 
 
 def test_project_retirement_age_validation(predictor):
@@ -77,10 +81,11 @@ def test_api_predict_and_project():
     predict_response = client.post('/api/salary-growth/predict', json={
         'current_age': 32,
         'current_salary': 5000,
-        'occupation': '-1.0',
+        'occupation': '금융 데이터 분석가',
     })
     assert predict_response.status_code == 200
     assert predict_response.json()['model'] == 'catboost_m3'
+    assert predict_response.json()['occupation_mapping']['source'] == 'keyword_mapping'
 
     project_response = client.post('/api/salary-growth/project', json={
         'current_age': 32,
@@ -88,7 +93,41 @@ def test_api_predict_and_project():
         'current_salary': 5000,
         'occupation': '-1.0',
     })
-    assert project_response.status_code == 200
-    body = project_response.json()
-    assert body['blocks'][-1]['end_age'] == 60
-    assert body['salary_path'][-1]['age'] == 60
+    assert project_response.status_code == 409
+    assert 'CAGR' in project_response.json()['detail']
+
+
+def test_db_finance_falls_back_when_projection_target_is_not_cagr():
+    user = UserPensionInput.model_validate({
+        'age': 32,
+        'retirement_age': 60,
+        'annual_income': 5000,
+        'desired_monthly_income': 250,
+        'operation_type': 'DB',
+        'current_tenure_years': 3,
+        'industry_job': '금융 데이터 분석가',
+    })
+    result = finance_engine_tool(user)
+    assert result['calculation_basis'] == 'wage_growth_rate_fallback'
+    assert result['salary_projection'] is None
+    assert 'fallback' in result['calculation_note']
+
+
+def test_dc_finance_keeps_fixed_contribution_without_supported_salary_path():
+    user = UserPensionInput.model_validate({
+        'age': 32,
+        'retirement_age': 60,
+        'annual_income': 5000,
+        'desired_monthly_income': 250,
+        'operation_type': 'DC',
+        'current_savings': 1000,
+        'annual_contribution': 360,
+        'personal_additional_contribution': 120,
+        'provider': '삼성증권',
+        'product_name': '테스트 상품',
+        'investment_type': '중립투자형',
+        'industry_job': '금융 데이터 분석가',
+    })
+    result = finance_engine_tool(user)
+    assert result['salary_projection'] is None
+    assert result['contribution_projection_basis'] == 'fixed_annual_contribution'

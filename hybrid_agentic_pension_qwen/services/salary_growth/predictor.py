@@ -20,6 +20,23 @@ REQUIRED_FILENAMES = {
     'smoke_test': 'smoke_test.json',
 }
 
+OCCUPATION_KEYWORD_MAP = [
+    ('222.0', ['데이터', '개발', '프로그래머', '소프트웨어', 'it', 'ai', '인공지능', '시스템', '엔지니어']),
+    ('320.0', ['금융', '은행', '증권', '보험', '자산운용', '투자']),
+    ('212.0', ['회계', '세무', '감사', '재무']),
+    ('213.0', ['마케팅', '기획', '컨설팅', '분석가', '연구원']),
+    ('243.0', ['교사', '강사', '교육']),
+    ('245.0', ['의사', '간호', '의료', '보건']),
+    ('411.0', ['사무', '행정', '총무']),
+    ('510.0', ['영업', '판매', '매장']),
+    ('531.0', ['서비스', '상담', '고객']),
+    ('611.0', ['농업', '어업', '축산']),
+    ('721.0', ['전기', '전자', '정비', '설비']),
+    ('741.0', ['건설', '건축', '토목']),
+    ('821.0', ['운전', '배송', '물류']),
+    ('910.0', ['단순', '보조', '현장']),
+]
+
 
 class SalaryGrowthArtifactError(RuntimeError):
     pass
@@ -84,19 +101,54 @@ class SalaryGrowthPredictor:
             self._model = model
         return self._model
 
-    def normalize_occupation(self, occupation: str) -> str:
+    def normalize_occupation(self, occupation: str) -> dict[str, Any]:
         raw = str(occupation).strip()
         if not raw:
-            raise ValueError('occupation is required')
+            return {
+                'input': raw,
+                'category': '-1.0',
+                'source': 'empty_fallback',
+                'confidence': 'low',
+                'fallback': True,
+            }
         if raw in self.occupation_categories:
-            return raw
+            return {
+                'input': raw,
+                'category': raw,
+                'source': 'exact_category',
+                'confidence': 'high',
+                'fallback': False,
+            }
         try:
             numeric = f'{float(raw):.1f}'
         except ValueError:
             numeric = raw
         if numeric in self.occupation_categories:
-            return numeric
-        raise ValueError(f'unsupported occupation category: {occupation}')
+            return {
+                'input': raw,
+                'category': numeric,
+                'source': 'numeric_category',
+                'confidence': 'high',
+                'fallback': False,
+            }
+
+        lowered = raw.lower()
+        for category, keywords in OCCUPATION_KEYWORD_MAP:
+            if category in self.occupation_categories and any(keyword in lowered for keyword in keywords):
+                return {
+                    'input': raw,
+                    'category': category,
+                    'source': 'keyword_mapping',
+                    'confidence': 'medium',
+                    'fallback': False,
+                }
+        return {
+            'input': raw,
+            'category': '-1.0',
+            'source': 'unknown_fallback',
+            'confidence': 'low',
+            'fallback': True,
+        }
 
     @staticmethod
     def annual_to_monthly_salary(current_salary: float) -> float:
@@ -108,7 +160,8 @@ class SalaryGrowthPredictor:
     def predict(self, current_age: int, current_salary: float, occupation: str) -> dict[str, Any]:
         if current_age < 17 or current_age > 90:
             raise ValueError('current_age must be between 17 and 90')
-        normalized_occupation = self.normalize_occupation(occupation)
+        occupation_mapping = self.normalize_occupation(occupation)
+        normalized_occupation = occupation_mapping['category']
         monthly_wage = self.annual_to_monthly_salary(current_salary)
         log_wage_t = math.log1p(monthly_wage)
         row = [[log_wage_t, int(current_age), normalized_occupation]]
@@ -126,6 +179,7 @@ class SalaryGrowthPredictor:
             'target_definition': target.get('formula'),
             'target_type': target.get('target_type'),
             'projection_supported': bool(target.get('is_cagr') is True),
+            'occupation_mapping': occupation_mapping,
             'input_features': {
                 'log_wage_t': log_wage_t,
                 'age': int(current_age),

@@ -7,6 +7,8 @@ from typing import Any
 import numpy as np
 
 from .models import UserPensionInput
+from services.salary_growth.predictor import SalaryGrowthArtifactError
+from services.salary_growth.projector import SalaryGrowthProjectionUnsupported, SalaryGrowthProjector
 
 # 투자유형별 값은 이제 '현재 가입상품 계산'에 쓰지 않는다.
 # 포트폴리오 최적화 후보의 탐색범위/비교용 fallback에만 사용한다.
@@ -199,20 +201,32 @@ def profile_tool(user: UserPensionInput) -> dict[str, Any]:
     }
 
 
-def project_assets_by_return(user: UserPensionInput, annual_return: float, annual_contribution: float | None = None):
+def project_assets_by_return(
+    user: UserPensionInput,
+    annual_return: float,
+    annual_contribution: float | None = None,
+    contribution_schedule: dict[int, float] | None = None,
+):
     annual_contribution = (user.annual_contribution or 0) if annual_contribution is None else annual_contribution
     value = float(user.current_savings or 0)
     series = [{'year': 0, 'age': user.age, 'value': round(value, 2)}]
     for year in range(1, user.years_to_retirement + 1):
-        value = value * (1 + annual_return) + annual_contribution
-        series.append({'year': year, 'age': user.age + year, 'value': round(value, 2)})
+        age = user.age + year
+        contribution = annual_contribution if contribution_schedule is None else contribution_schedule.get(age, annual_contribution)
+        value = value * (1 + annual_return) + contribution
+        series.append({'year': year, 'age': age, 'value': round(value, 2), 'annual_contribution': round(contribution, 2)})
     return value, series
 
 
-def project_assets(user: UserPensionInput, safe_ratio: float, annual_contribution: float | None = None):
+def project_assets(
+    user: UserPensionInput,
+    safe_ratio: float,
+    annual_contribution: float | None = None,
+    contribution_schedule: dict[int, float] | None = None,
+):
     market = optimizer_candidate_market_inputs(safe_ratio)
     r = market['expected_return']
-    value, series = project_assets_by_return(user, r, annual_contribution)
+    value, series = project_assets_by_return(user, r, annual_contribution, contribution_schedule)
     return value, series, r
 
 
@@ -232,6 +246,69 @@ def _db_benefit_projection(user: UserPensionInput, wage_growth_rate_pct: float):
             'tenure_years': round(tenure, 2),
         })
     return series[-1]['value'], series
+
+
+def _db_benefit_projection_from_salary_projector(user: UserPensionInput) -> dict[str, Any]:
+    projection = SalaryGrowthProjector().project(
+        current_age=user.age,
+        retirement_age=user.retirement_age,
+        current_salary=user.annual_income,
+        occupation=user.industry_job or '',
+        initial_growth_override=user.wage_growth_rate,
+    )
+    salary_by_age = {int(point['age']): float(point['salary']) for point in projection['salary_path']}
+    series = []
+    for year in range(0, user.years_to_retirement + 1):
+        age = user.age + year
+        annual_income = salary_by_age.get(age, user.annual_income)
+        monthly_wage_proxy = annual_income / 12
+        tenure = float(user.current_tenure_years or 0) + year
+        estimated_benefit = monthly_wage_proxy * tenure
+        series.append({
+            'year': year,
+            'age': age,
+            'value': round(estimated_benefit, 2),
+            'annual_income': round(annual_income, 2),
+            'tenure_years': round(tenure, 2),
+        })
+    first_block = projection['blocks'][0] if projection['blocks'] else {}
+    return {
+        'benefit': series[-1]['value'],
+        'series': series,
+        'retirement_income': series[-1]['annual_income'],
+        'first_block_growth_rate_pct': float(first_block.get('final_growth', 0.0)),
+        'salary_projection': projection,
+    }
+
+
+def _salary_projection_for_user(user: UserPensionInput) -> dict[str, Any] | None:
+    if user.operation_type not in {'DB', 'DC'}:
+        return None
+    try:
+        return SalaryGrowthProjector().project(
+            current_age=user.age,
+            retirement_age=user.retirement_age,
+            current_salary=user.annual_income,
+            occupation=user.industry_job or '',
+            initial_growth_override=user.wage_growth_rate,
+        )
+    except (SalaryGrowthArtifactError, SalaryGrowthProjectionUnsupported):
+        return None
+
+
+def _dc_contribution_schedule_from_salary_path(user: UserPensionInput, salary_projection: dict[str, Any] | None) -> dict[int, float] | None:
+    if user.operation_type != 'DC' or not salary_projection or user.annual_income <= 0:
+        return None
+    employer_base = float(user.annual_contribution or 0)
+    personal_fixed = float(user.personal_additional_contribution or 0)
+    schedule: dict[int, float] = {}
+    for point in salary_projection.get('salary_path') or []:
+        age = int(point['age'])
+        if age <= user.age:
+            continue
+        salary_ratio = float(point['salary']) / float(user.annual_income)
+        schedule[age] = employer_base * salary_ratio + personal_fixed
+    return schedule
 
 
 def _component_market_input(component: dict[str, Any]) -> dict[str, Any]:
@@ -351,19 +428,42 @@ def finance_engine_tool(user: UserPensionInput, product_extraction: dict[str, An
     target = user.desired_monthly_income * 12 / WITHDRAWAL_RATE
 
     if user.operation_type == 'DB':
-        wage = estimate_wage_growth(user)
-        benefit, series = _db_benefit_projection(user, wage['rate_pct'])
-        retirement_income = user.annual_income * ((1 + wage['rate_pct'] / 100) ** user.years_to_retirement)
+        try:
+            projected = _db_benefit_projection_from_salary_projector(user)
+            wage = {
+                'rate_pct': round(projected['first_block_growth_rate_pct'], 2),
+                'source': 'catboost_m3_salary_projector',
+            }
+            benefit = float(projected['benefit'])
+            series = projected['series']
+            retirement_income = float(projected['retirement_income'])
+            salary_projection = projected['salary_projection']
+            calculation_basis = 'salary_growth_projector'
+            calculation_note = (
+                'DB 예상급여는 단일 임금상승률을 은퇴까지 고정 적용하지 않고, '
+                'CatBoost M3 3년 예측을 재귀적으로 갱신하면서 장기 구간은 age curve로 보정했습니다. '
+                '현재 blending rule은 provisional이며 historical backtest로 검증 전입니다.'
+            )
+        except (SalaryGrowthArtifactError, SalaryGrowthProjectionUnsupported) as exc:
+            wage = estimate_wage_growth(user)
+            benefit, series = _db_benefit_projection(user, wage['rate_pct'])
+            retirement_income = user.annual_income * ((1 + wage['rate_pct'] / 100) ** user.years_to_retirement)
+            salary_projection = None
+            calculation_basis = 'wage_growth_rate_fallback'
+            calculation_note = f'CatBoost salary projector를 사용할 수 없어 기존 임금상승률 기반 fallback으로 계산했습니다. reason={exc}'
         gap = target - benefit
         return {
             'engine_type': 'DB_BENEFIT_ENGINE',
+            'calculation_basis': calculation_basis,
             'target_retirement_asset': round(target, 2),
             'future_asset': round(benefit, 2),
             'estimated_db_benefit': round(benefit, 2),
             'estimated_retirement_annual_income': round(retirement_income, 2),
             'estimated_retirement_monthly_wage_proxy': round(retirement_income / 12, 2),
             'wage_growth_rate_pct': wage['rate_pct'],
+            'first_3y_wage_growth_rate_pct': wage['rate_pct'],
             'wage_growth_source': wage['source'],
+            'salary_projection': salary_projection,
             'current_tenure_years': user.current_tenure_years,
             'additional_tenure_years': user.expected_additional_tenure_years,
             'total_expected_tenure_years': user.total_expected_tenure_years,
@@ -371,15 +471,19 @@ def finance_engine_tool(user: UserPensionInput, product_extraction: dict[str, An
             'goal_rate_pct': round(benefit / target * 100, 1),
             'withdrawal_rate_assumption': WITHDRAWAL_RATE,
             'series': series,
-            'calculation_note': 'DB 예상급여 간이식: 은퇴시점 월평균임금 proxy × 예상 총 근속연수. 실제 지급액은 평균임금·퇴직연금규약 등에 따라 달라질 수 있습니다.',
+            'calculation_note': calculation_note,
         }
 
     market = product_market_inputs(product_extraction, user.investment_type)
-    future, series = project_assets_by_return(user, market['expected_return'])
+    salary_projection = _salary_projection_for_user(user)
+    contribution_schedule = _dc_contribution_schedule_from_salary_path(user, salary_projection)
+    future, series = project_assets_by_return(user, market['expected_return'], contribution_schedule=contribution_schedule)
     gap = target - future
     return {
         'engine_type': 'DC_IRP_PRODUCT_PDF_ENGINE',
         'calculation_basis': market['calculation_basis'],
+        'salary_projection': salary_projection,
+        'contribution_projection_basis': 'salary_path' if contribution_schedule else 'fixed_annual_contribution',
         'source_file_id': market['source_file_id'],
         'source_filename': market['source_filename'],
         'expected_return': round(market['expected_return'], 6),
@@ -408,8 +512,18 @@ def monte_carlo_tool(
     n = int(max(500, min(simulations, 8000)))
 
     if user.operation_type == 'DB':
-        wage = estimate_wage_growth(user)
-        mu = wage['rate_pct'] / 100.0
+        try:
+            projected = _db_benefit_projection_from_salary_projector(user)
+            retirement_income = float(projected['retirement_income'])
+            if user.years_to_retirement > 0 and user.annual_income > 0:
+                mu = (retirement_income / user.annual_income) ** (1 / user.years_to_retirement) - 1
+            else:
+                mu = projected['first_block_growth_rate_pct'] / 100.0
+            wage_source = 'catboost_m3_salary_projector'
+        except (SalaryGrowthArtifactError, SalaryGrowthProjectionUnsupported):
+            wage = estimate_wage_growth(user)
+            mu = wage['rate_pct'] / 100.0
+            wage_source = wage['source']
         sigma = 0.015
         seed_text = f'DB|{user.age}|{user.retirement_age}|{user.annual_income}|{user.current_tenure_years}|{mu}'
         seed = int(hashlib.sha256(seed_text.encode('utf-8')).hexdigest()[:8], 16)
@@ -427,11 +541,14 @@ def monte_carlo_tool(
             'p10': round(float(np.percentile(values, 10)), 2),
             'p50': round(float(np.percentile(values, 50)), 2),
             'p90': round(float(np.percentile(values, 90)), 2),
-            'assumed_wage_growth_pct': wage['rate_pct'],
+            'assumed_wage_growth_pct': round(mu * 100, 2),
+            'wage_growth_source': wage_source,
             'wage_growth_volatility_pct': round(sigma * 100, 2),
         }
 
     annual_contribution = (user.annual_contribution or 0) if annual_contribution is None else annual_contribution
+    salary_projection = _salary_projection_for_user(user)
+    contribution_schedule = _dc_contribution_schedule_from_salary_path(user, salary_projection)
     if safe_ratio is None:
         market = product_market_inputs(product_extraction, user.investment_type)
         mu = market['expected_return']
@@ -449,9 +566,11 @@ def monte_carlo_tool(
     seed = int(hashlib.sha256(seed_text.encode('utf-8')).hexdigest()[:8], 16)
     rng = np.random.default_rng(seed)
     values = np.full(n, float(user.current_savings or 0), dtype=np.float64)
-    for _ in range(user.years_to_retirement):
+    for year in range(1, user.years_to_retirement + 1):
+        age = user.age + year
+        contribution = annual_contribution if contribution_schedule is None else contribution_schedule.get(age, annual_contribution)
         annual_returns = np.clip(rng.normal(mu, sigma, size=n), -0.65, 0.65)
-        values = values * (1 + annual_returns) + annual_contribution
+        values = values * (1 + annual_returns) + contribution
 
     return {
         'simulation_type': 'DC_IRP_MARKET_RETURN',
@@ -464,6 +583,7 @@ def monte_carlo_tool(
         'p90': round(float(np.percentile(values, 90)), 2),
         'assumed_return': round(mu, 6),
         'assumed_volatility': round(sigma, 6),
+        'contribution_projection_basis': 'salary_path' if contribution_schedule else 'fixed_annual_contribution',
     }
 
 
@@ -533,7 +653,13 @@ def portfolio_optimizer_tool(user: UserPensionInput, product_extraction: dict[st
         }
 
     current_market = product_market_inputs(product_extraction, user.investment_type)
-    current_future, _ = project_assets_by_return(user, current_market['expected_return'])
+    salary_projection = _salary_projection_for_user(user)
+    contribution_schedule = _dc_contribution_schedule_from_salary_path(user, salary_projection)
+    current_future, _ = project_assets_by_return(
+        user,
+        current_market['expected_return'],
+        contribution_schedule=contribution_schedule,
+    )
     current_safe = current_market['safe_ratio_proxy']
 
     low, high = _allowed_safe_ratio_range(user)
@@ -541,7 +667,7 @@ def portfolio_optimizer_tool(user: UserPensionInput, product_extraction: dict[st
     for safe_ratio in np.arange(low, high + 0.001, 0.05):
         safe_ratio = float(round(safe_ratio, 4))
         market = optimizer_candidate_market_inputs(safe_ratio)
-        future, series, r = project_assets(user, safe_ratio)
+        future, series, r = project_assets(user, safe_ratio, contribution_schedule=contribution_schedule)
         mc = monte_carlo_tool(user, product_extraction=product_extraction, safe_ratio=safe_ratio, simulations=900)
         success = mc['success_probability_pct']
         vol = market['volatility']
@@ -592,6 +718,8 @@ def portfolio_optimizer_tool(user: UserPensionInput, product_extraction: dict[st
         'expected_return': round(r, 5),
         'expected_volatility': round(best['volatility'], 6),
         'future_asset': round(future, 2),
+        'salary_projection': salary_projection,
+        'contribution_projection_basis': 'salary_path' if contribution_schedule else 'fixed_annual_contribution',
         'goal_rate_pct': round(future / target * 100, 1),
         'success_probability_pct': mc['success_probability_pct'],
         'required_annual_contribution_for_expected_target': round(required, 2),

@@ -55,6 +55,21 @@
             <span>은퇴 후 희망 월 소득</span>
             <div class="money-input"><input id="desiredMonthlyIncome" type="number" min="1" value="250" required /><em>만원</em></div>
           </label>
+
+          <label class="field common-job-field">
+            <span>현재 직종</span>
+            <input id="currentJob" type="text" maxlength="120" placeholder="예: 금융 데이터 분석가" />
+          </label>
+
+          <div class="field common-wage-growth-field">
+            <span>AI 임금 상승 예측</span>
+            <div class="inline-control">
+              <span class="inline-field-label">향후 3년 예상 연평균 임금상승률</span>
+              <div class="unit-input grow"><input id="wageGrowthRate" type="number" min="-5" max="20" step="0.1" placeholder="향후 3년 예상" /><em>%</em></div>
+              <button id="estimateWageBtn" class="estimate-btn" type="button">깨움이 추정</button>
+            </div>
+            <small id="wageGrowthHint" class="field-hint">깨움 AI가 현재 나이·연소득·직종을 기반으로 추정했습니다. 원하면 직접 수정할 수 있습니다. 이 값은 은퇴까지 고정 적용되는 상수가 아니라 최초 3년 AI 추정값입니다.</small>
+          </div>
         </div>
 
         <div class="operation-block">
@@ -81,41 +96,6 @@
             <label class="field">
               <span>예상 추가 근속연수</span>
               <div class="derived-value"><strong id="additionalTenureDisplay">28년</strong><small>현재 나이와 은퇴 나이로 자동 계산</small></div>
-            </label>
-
-            <label class="field">
-              <span>업종 / 직군 <small class="optional-tag">(선택사항)</small></span>
-              <input id="industryJob" type="text" maxlength="120" placeholder="예: 금융 / 데이터 분석" />
-            </label>
-
-            <label class="field">
-              <span>회사 규모 <small class="optional-tag">(선택사항)</small></span>
-              <select id="companySize">
-                <option value="">선택 안 함</option>
-                <option value="대기업">대기업</option>
-                <option value="중견기업">중견기업</option>
-                <option value="중소기업">중소기업</option>
-                <option value="공공/기타">공공/기타</option>
-              </select>
-            </label>
-
-            <div class="field salary-history-field">
-              <span>최근 연봉 이력 <small class="optional-tag">(선택사항)</small></span>
-              <div class="salary-history-grid">
-                <div class="money-input"><input id="salary3YearsAgo" type="number" min="1" placeholder="3년 전" /><em>만원</em></div>
-                <div class="money-input"><input id="salary2YearsAgo" type="number" min="1" placeholder="2년 전" /><em>만원</em></div>
-                <div class="money-input"><input id="salary1YearAgo" type="number" min="1" placeholder="1년 전" /><em>만원</em></div>
-              </div>
-              <small class="field-hint">입력값이 없으면 시장 benchmark 기반으로 임금상승률을 추정합니다.</small>
-            </div>
-
-            <label class="field wage-growth-field">
-              <span>예상 임금상승률 <small class="optional-tag">(선택사항)</small></span>
-              <div class="inline-control">
-                <div class="unit-input grow"><input id="wageGrowthRate" type="number" min="-5" max="20" step="0.1" placeholder="직접 입력 또는 자동 추정" /><em>%</em></div>
-                <button id="estimateWageBtn" class="estimate-btn" type="button">깨움이 추정</button>
-              </div>
-              <small id="wageGrowthHint" class="field-hint">비워두면 직군·회사규모·연봉 이력을 이용해 자동 추정합니다.</small>
             </label>
 
           </div>
