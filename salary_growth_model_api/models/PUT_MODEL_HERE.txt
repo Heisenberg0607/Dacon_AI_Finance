@@ -1,0 +1,1 @@
+Run ..\copy_model.bat from the repository root or run copy_model.bat inside salary_growth_model_api.
