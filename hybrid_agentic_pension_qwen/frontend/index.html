@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>깨움 KKAEUM</title>
-  <link rel="stylesheet" href="/static/styles.css?v=33" />
+  <link rel="stylesheet" href="/static/styles.css?v=34" />
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -200,8 +200,8 @@
             <span>AI</span>
           </div>
           <p>깨움 AI 에이전트</p>
+          <!-- v34: 단계 부연 문구(agentDetail)를 없앴다. 무엇을 하는 중인지는 윗줄이 말한다. -->
           <strong id="agentState">상황 분석 / 작업 계획</strong>
-          <small id="agentDetail">사용자 입력을 구조화합니다.</small>
 
           <!-- v20: 남은 대기시간. 근거는 /api/eta가 돌려주는 과거 실측 이력뿐이며,
                이력이 없거나 예상을 넘기면 숫자를 지어내지 않고 비확정 상태로 표시한다. -->
@@ -315,7 +315,8 @@
             </div>
             <div class="compare-actions">
               <button id="compareBtn" class="primary-btn compact" type="button">이 상품으로 계산</button>
-              <button id="compareResetBtn" class="secondary-btn compact hidden" type="button">가입 상품으로 되돌리기</button>
+              <!-- v33: 계산해 둔 비교 결과를 껐다 켠다. 서버를 다시 부르지 않는다. -->
+              <button id="compareToggleBtn" class="secondary-btn compact hidden" type="button" aria-pressed="false">가입 상품만 보기</button>
             </div>
           </div>
           <p class="compare-status hidden" id="compareStatus"></p>
@@ -370,6 +371,6 @@
   </main>
 
   <footer>깨움 KKAEUM · 당신의 AI 연금분석 에이전트</footer>
-  <script src="/static/app.js?v=41"></script>
+  <script src="/static/app.js?v=44"></script>
 </body>
 </html>
