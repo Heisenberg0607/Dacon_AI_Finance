@@ -317,16 +317,6 @@ function statusKo(status){
   const m={running:'진행 중',done:'완료',retry:'재검토',wait:'대기',error:'오류','revised-with-warnings':'수정 후 완료'};
   return m[status] || status || '';
 }
-function selectedByKo(value){
-  if(!value) return '';
-  const s=String(value);
-  if(s.includes('Qwen function calling')) return 'Qwen 도구 선택';
-  if(s==='Qwen') return 'Qwen';
-  if(s.includes('fallback-orchestrator')) return '안전 실행 로직';
-  if(s==='fallback') return '안전 실행 로직';
-  if(s==='template') return '보고서 템플릿';
-  return s;
-}
 function ragModeKo(value){
   if(!value) return '-';
   const s=String(value).toLowerCase();
@@ -526,7 +516,6 @@ function startPendingAnimation(operationType, options){
   setStageScope(operationType);
   resetNodes(); progressIndex=0;
   $('agentState').textContent='분석을 시작합니다.';
-  $('agentDetail').textContent='깨움 AI 에이전트가 필요한 분석 도구를 선택하고 있습니다.';
   if(options && options.simulate) startSimulatedStages();
 }
 
@@ -541,10 +530,10 @@ function applyStageEvent(ev){
     : 'done';
   setNode(stage, status);
   if(status==='running'){
+    // v34: 단계 아래 부연 줄(agentDetail)을 통째로 없앴다. 거기 있던 문구는 어떤 방식으로
+    // 골랐는지(Qwen 도구 선택 / 안전 실행 로직) 같은 내부 구현이었고, 지금 무엇을 하는
+    // 중인지는 이 줄이 이미 말한다.
     $('agentState').textContent=PENDING_MESSAGE[stage] || toolKo(ev.tool || stage);
-    $('agentDetail').textContent=ev.selected_by
-      ? `${selectedByKo(ev.selected_by)} 방식으로 이 단계를 실행하는 중입니다.`
-      : '실행 중입니다.';
   }
 }
 
@@ -562,13 +551,12 @@ function startSimulatedStages(){
     if(progressIndex<stages.length){
       const s=stages[progressIndex]; setNode(s,'running');
       $('agentState').textContent=PENDING_MESSAGE[s]||'';
-      $('agentDetail').textContent='깨움 AI 에이전트의 분석 결과를 기다리는 중입니다.';
       progressIndex++;
       return;
     }
-    // 마지막 단계에 도착했다. 더 추정할 것이 없으므로 타이머를 멈추고, 무엇을 기다리는지 적는다.
+    // 마지막 단계에 도착했다. 더 추정할 것이 없으므로 타이머를 멈춘다.
+    // 무엇을 기다리는지는 마지막 단계 이름과 대기 게이지가 말한다.
     clearInterval(progressTimer); progressTimer=null;
-    $('agentDetail').textContent='마지막 단계입니다. 보고서 생성 결과를 기다리는 중입니다.';
   };
   tick(); progressTimer=setInterval(tick,900);
 }
@@ -688,17 +676,14 @@ async function finishTrace(result){
     const state=stageState[stage];
     if(state==='done' || state==='retry') continue;  // 대기 중에 이미 확정된 단계는 다시 건드리지 않는다
     const t=lastEntry.get(stage);
-    if(t){
-      $('agentState').textContent=toolKo(t.tool || stage);
-      $('agentDetail').textContent=t.selected_by ? `${selectedByKo(t.selected_by)} 방식으로 이 단계를 실행했습니다.` : '실행을 마쳤습니다.';
-    }
+    if(t) $('agentState').textContent=toolKo(t.tool || stage);
     if(state!=='running') setNode(stage,'running');
     await delay(FINISH_STEP_MS);
     setNode(stage, (t && t.status==='retry') ? 'retry' : 'done');
   }
 
-  const totalTook = result.timing && result.timing.total_seconds != null ? ` 총 소요시간 ${fmtDuration(result.timing.total_seconds)}.` : '';
-  $('agentState').textContent='분석 완료'; $('agentDetail').textContent=`전략 검증을 거친 최종 보고서가 준비되었습니다.${totalTook}`;
+  // v34: 총 소요시간은 보고서 표지의 소요시간 칩(renderTiming)이 이미 실측값으로 보여준다.
+  $('agentState').textContent='분석 완료';
 }
 
 function renderTiming(timing){
@@ -825,19 +810,24 @@ function renderProjection(r){
   drawChart(chartSeries(r), f.target_retirement_asset);
 }
 /* ---- v21: 다른 상품으로 전망만 다시 계산해 비교 ---- */
-// baseline은 가입 상품 기준 원본 분석. 되돌리기와 비교 기준으로 쓴다.
+// baseline은 가입 상품 기준 원본 분석. 파선과 '가입 상품만 보기'의 기준으로 쓴다.
 let compareBaseline = null;
+// v33: 계산한 비교 결과를 들고 있는다. 껐다 켜는 것은 화면 전환일 뿐이라 서버를 다시 부르지 않는다.
+let compareResult = null;
+let compareVisible = false;
 let compareBusy = false;
 
 function setupCompare(r){
   compareBaseline = r;
+  compareResult = null;
+  compareVisible = false;
   const bar=$('compareBar');
   // DB형은 개인 선택 상품이 없어 비교 대상이 존재하지 않는다.
   if(r.user.operation_type === 'DB'){ bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden');
   $('compareStatus').classList.add('hidden');
   $('compareNote').classList.add('hidden');
-  $('compareResetBtn').classList.add('hidden');
+  $('compareToggleBtn').classList.add('hidden');
 
   // 사업자는 가입 상품 기준으로 고정한다. 사업자를 넘나드는 비교는 사용자가 당장 실행할 수 없는
   // 선택지라, 같은 사업자 안에서 상품만 갈아보는 쪽이 실제로 행동으로 옮길 수 있는 비교다.
@@ -892,13 +882,11 @@ async function runCompare(){
     const d=await res.json();
     if(!d.applicable){ throw new CompareError(d.note || '이 분석에는 상품 비교를 적용할 수 없습니다.'); }
 
-    // 원본 user는 유지한 채 상품 관련 계산 결과만 갈아끼워 같은 렌더 경로를 태운다.
-    // compareBaseline을 함께 넘겨 가입 상품 두 선을 같은 그래프에 남긴다(v32).
-    renderProjection({user: compareBaseline.user, finance: d.finance, monte_carlo: d.monte_carlo, optimizer: d.optimizer,
-                      projectionProductName: d.product.product_name, compareBaseline});
-    $('compareStatus').textContent = compareStatusText(d);
-    $('compareResetBtn').classList.remove('hidden');
-    showCompareNote(d, compareBaseline);
+    // 결과는 들고만 있고 화면 반영은 renderCompareView가 한다(v33).
+    // 껐다 켜는 것은 화면 전환일 뿐이므로 이 응답을 버리지 않는다.
+    compareResult = d;
+    compareVisible = true;
+    renderCompareView();
   }catch(err){
     console.error('상품 비교 재계산 실패:', err);
     // err.message는 위에서 모두 한국어 안내로 만들어 넣은 값이다. 그렇지 않은 예외(렌더 중
@@ -928,17 +916,58 @@ function showCompareNote(d, base){
   }
 }
 
-function resetCompare(){
+/* ---- v33: 비교를 껐다 켜는 토글 ---- */
+// 예전에는 '가입 상품으로 되돌리기'가 비교 결과를 버렸다. 다시 보려면 같은 상품을
+// 골라 계산을 또 눌러야 했고, Qwen 모드에서는 그때마다 추출 비용이 들었다.
+// 이제 결과를 들고 있으면서 화면만 바꾼다. 끈 상태는 예전 '되돌리기' 직후와 같은 화면이다.
+function compareHiddenText(d){
+  return `비교 결과를 숨겼습니다 · ${d.product.product_name} · '비교 상품 함께 보기'를 누르면 다시 계산하지 않고 바로 보여줍니다.`;
+}
+
+function renderCompareView(){
   if(!compareBaseline) return;
-  renderProjection(compareBaseline);
-  $('compareStatus').classList.add('hidden');
-  $('compareNote').classList.add('hidden');
-  $('compareResetBtn').classList.add('hidden');
-  fillCompareProducts();
+  const on = compareVisible && !!compareResult;
+
+  // 그래프와 아래 숫자 칸은 항상 같은 기준을 봐야 한다. 켜면 고른 상품, 끄면 가입 상품.
+  if(on){
+    const d=compareResult;
+    // 원본 user는 유지한 채 상품 관련 계산 결과만 갈아끼워 같은 렌더 경로를 태운다.
+    // compareBaseline을 함께 넘겨 가입 상품 두 선을 같은 그래프에 남긴다(v32).
+    renderProjection({user: compareBaseline.user, finance: d.finance, monte_carlo: d.monte_carlo,
+                      optimizer: d.optimizer, projectionProductName: d.product.product_name,
+                      compareBaseline});
+  }else{
+    renderProjection(compareBaseline);
+  }
+
+  const btn=$('compareToggleBtn');
+  btn.classList.toggle('hidden', !compareResult);
+  if(compareResult){
+    btn.textContent = on ? '가입 상품만 보기' : '비교 상품 함께 보기';
+    btn.setAttribute('aria-pressed', String(on));
+  }
+
+  const status=$('compareStatus');
+  if(compareResult){
+    status.textContent = on ? compareStatusText(compareResult) : compareHiddenText(compareResult);
+    status.classList.remove('hidden');
+  }else{
+    status.classList.add('hidden');
+  }
+
+  // demo 모드 안내는 비교를 보고 있을 때만 뜻이 있다. 끈 화면에는 비교할 상대가 없다.
+  if(on) showCompareNote(compareResult, compareBaseline);
+  else $('compareNote').classList.add('hidden');
+}
+
+function toggleCompare(){
+  if(!compareResult) return;
+  compareVisible = !compareVisible;
+  renderCompareView();
 }
 
 $('compareBtn').addEventListener('click', runCompare);
-$('compareResetBtn').addEventListener('click', resetCompare);
+$('compareToggleBtn').addEventListener('click', toggleCompare);
 
 function renderAllocation(allocation){ $('allocationBars').innerHTML=Object.entries(allocation||{}).map(([k,v])=>`<div class="allocation-row"><span>${esc(k)}</span><div class="allocation-track"><div class="allocation-fill" style="width:${Math.max(0,Math.min(100,Number(v)))}%"></div></div><strong>${fmtPct(v,1)}</strong></div>`).join(''); }
 /* ---- v22: 전망 그래프 범례 + 마우스 오버 툴팁 ---- */
