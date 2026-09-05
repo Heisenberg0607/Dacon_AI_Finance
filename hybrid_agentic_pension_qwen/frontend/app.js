@@ -821,14 +821,8 @@ function renderProjection(r){
     renderAllocation(o.recommended_allocation);
   }
   $('optimizedGoal').textContent=fmtPct(o.goal_rate_pct,1);
-  // 비교 재계산일 때는 파란 선이 가입 상품이 아니라 방금 고른 상품 기준이다.
-  // r.user는 원본 그대로라 상품명을 여기서 따로 받아야 범례·툴팁이 거짓말을 하지 않는다.
-  drawChart(f.series,o.series,f.target_retirement_asset,{
-    isDB,
-    isCompare: !!r.projectionProductName,
-    productName: r.projectionProductName || r.user.product_name,
-    wageGrowthPct: f.wage_growth_rate_pct,
-  });
+  // 그래프에 그릴 선은 chartSeries가 정한다. 비교 중이면 가입 상품 두 선이 함께 들어온다.
+  drawChart(chartSeries(r), f.target_retirement_asset);
 }
 /* ---- v21: 다른 상품으로 전망만 다시 계산해 비교 ---- */
 // baseline은 가입 상품 기준 원본 분석. 되돌리기와 비교 기준으로 쓴다.
@@ -872,7 +866,9 @@ function fillCompareProducts(){
 
 function compareStatusText(d){
   const p=d.product;
-  return `비교용 시뮬레이션 · ${p.product_name} (${p.investment_type}) 기준 · 보고서 본문과 챗봇은 가입 상품 기준 그대로입니다.`;
+  // 아래 숫자 칸은 고른 상품 하나만 보여주지만 그래프에는 네 선이 함께 있다.
+  // 그 차이를 적어두지 않으면 숫자와 그래프가 어긋난 것처럼 보인다.
+  return `비교용 시뮬레이션 · ${p.product_name} (${p.investment_type}) 기준 · 그래프는 가입 상품(파선)과 고른 상품(실선)을 함께 그립니다 · 아래 숫자와 보고서 본문·챗봇은 각각 고른 상품, 가입 상품 기준입니다.`;
 }
 
 async function runCompare(){
@@ -897,8 +893,9 @@ async function runCompare(){
     if(!d.applicable){ throw new CompareError(d.note || '이 분석에는 상품 비교를 적용할 수 없습니다.'); }
 
     // 원본 user는 유지한 채 상품 관련 계산 결과만 갈아끼워 같은 렌더 경로를 태운다.
+    // compareBaseline을 함께 넘겨 가입 상품 두 선을 같은 그래프에 남긴다(v32).
     renderProjection({user: compareBaseline.user, finance: d.finance, monte_carlo: d.monte_carlo, optimizer: d.optimizer,
-                      projectionProductName: d.product.product_name});
+                      projectionProductName: d.product.product_name, compareBaseline});
     $('compareStatus').textContent = compareStatusText(d);
     $('compareResetBtn').classList.remove('hidden');
     showCompareNote(d, compareBaseline);
@@ -957,49 +954,102 @@ let chartState = null;
 
 // name은 범례용 전체 이름, short는 툴팁용 짧은 이름이다. 툴팁은 커서를 따라다니며 그래프를
 // 가리므로 상품명까지 넣으면 상자가 화면 절반을 덮는다. 어느 상품인지는 범례에 이미 적혀 있다.
-function chartSeriesInfo(meta){
+//
+// v32: 상품을 바꿔 계산하면 네 선을 한 그래프에 함께 그린다.
+//   색  = 계산 종류 (파랑 = 상품 구성비중 그대로, 주황 = 최적화 자산배분)
+//   선  = 어느 상품인지 (파선 = 지금 가입 상품, 실선 = 방금 고른 상품)
+// 색을 상품에 배정하지 않은 이유는, 사용자가 실제로 견주는 짝이 '같은 계산끼리'이기 때문이다.
+// 같은 색 두 선 사이의 세로 간격이 곧 상품을 바꿨을 때의 차이가 되고, 파랑/주황이 원래
+// 가지고 있던 뜻(구성비중 vs 최적화)도 비교 전후로 흔들리지 않는다.
+function chartSeries(r){
+  const f=r.finance, o=r.optimizer, base=r.compareBaseline;
   // DB형은 optimizer.series가 finance.series와 같은 배열이라 두 선이 완전히 겹친다.
-  // 없는 구분을 범례에 적으면 오히려 거짓말이 되므로 한 줄로만 설명한다.
-  if(meta.isDB){
-    return [{key:'current', color:CHART_COLORS.current, name:'예상 퇴직급여 (DB)', short:'예상 퇴직급여 (DB)',
-             desc:`임금상승률 ${Number(meta.wageGrowthPct||0).toFixed(2)}% 가정 · 근속연수 누적`}];
+  // 없는 구분을 범례에 적으면 오히려 거짓말이 되므로 한 줄로만 그린다.
+  if(r.user.operation_type === 'DB'){
+    return [{key:'current', color:CHART_COLORS.current, points:f.series,
+             name:'예상 퇴직급여 (DB)', short:'예상 퇴직급여 (DB)',
+             desc:`임금상승률 ${Number(f.wage_growth_rate_pct||0).toFixed(2)}% 가정 · 근속연수 누적`}];
   }
-  const basis = meta.isCompare ? '비교 상품 기준' : '가입 상품 기준';
-  return [
-    {key:'current', color:CHART_COLORS.current, short:basis,
-     name:`${basis} · ${meta.productName||'선택 상품'}`,
-     desc:`${meta.isCompare?'지금 고른 상품':'현재 가입 상품'}의 구성비중으로 계산한 전망`},
-    {key:'optimized', color:CHART_COLORS.optimized, name:'최적화 자산배분 기준', short:'최적화 자산배분 기준',
-     desc:'깨움이 추천한 자산배분을 따랐을 때의 전망'},
+  if(!base){
+    return [
+      {key:'current', color:CHART_COLORS.current, points:f.series, short:'가입 상품 기준',
+       name:`가입 상품 기준 · ${r.user.product_name||'선택 상품'}`,
+       desc:'현재 가입 상품의 구성비중으로 계산한 전망'},
+      {key:'optimized', color:CHART_COLORS.optimized, points:o.series,
+       name:'최적화 자산배분 기준', short:'최적화 자산배분 기준',
+       desc:'깨움이 추천한 자산배분을 따랐을 때의 전망'},
+    ];
+  }
+  // 범례 순서는 (가입 → 고름) 짝을 붙여 둔다. 같은 색 두 줄이 나란히 놓여야
+  // "이 상품에서 저 상품으로 바꾸면 이만큼"이 한눈에 읽힌다.
+  const list=[
+    {key:'base-current', color:CHART_COLORS.current, dash:true, points:(base.finance||{}).series, short:'가입 상품',
+     name:`지금 가입 상품 · ${base.user.product_name||'가입 상품'}`,
+     desc:'바꾸기 전 상품의 구성비중으로 계산한 전망'},
+    {key:'current', color:CHART_COLORS.current, points:f.series, short:'고른 상품',
+     name:`방금 고른 상품 · ${r.projectionProductName||'비교 상품'}`,
+     desc:'고른 상품의 구성비중으로 계산한 전망'},
+    {key:'base-optimized', color:CHART_COLORS.optimized, dash:true, points:(base.optimizer||{}).series,
+     name:'가입 상품의 최적화 자산배분', short:'가입 최적화',
+     desc:'바꾸기 전 상품의 투자유형으로 최적화했을 때의 전망'},
+    {key:'optimized', color:CHART_COLORS.optimized, points:o.series,
+     name:'고른 상품의 최적화 자산배분', short:'고른 최적화',
+     desc:'고른 상품의 투자유형으로 최적화했을 때의 전망'},
   ];
+  // API 키 없이 도는 최소 추출은 자산군을 구분하지 못해 상품을 바꿔도 전망이 그대로다.
+  // 그러면 같은 색 두 선이 완전히 포개져 한 선만 보인다. 범례가 네 줄인데 선이 둘이면
+  // 고장으로 읽히므로, 겹쳤다는 사실을 선을 그리기 전에 범례에 적어 둔다.
+  [['base-current','current'],['base-optimized','optimized']].forEach(([a,b])=>{
+    const x=list.find(s=>s.key===a), z=list.find(s=>s.key===b);
+    if(!sameSeries(x.points, z.points)) return;
+    x.desc += ' · 아래 선과 값이 같아 겹칩니다';
+    z.desc += ' · 위 선과 값이 같아 겹칩니다';
+  });
+  return list;
 }
 
-function renderChartLegend(meta, target){
-  const rows = chartSeriesInfo(meta).map(s=>
-    `<div class="legend-item"><i style="background:${s.color}"></i><div><b>${esc(s.name)}</b><span>${esc(s.desc)}</span></div></div>`);
+function sameSeries(a, b){
+  return Array.isArray(a) && Array.isArray(b) && a.length === b.length
+    && a.every((d,i)=>Number(d.value) === Number(b[i].value));
+}
+
+// 파선 범례 표식은 CSS 클래스 대신 계열색을 그대로 쓰는 그라디언트로 만든다.
+// 목표선 표식(.dash)은 색이 고정이지만 이쪽은 계열마다 색이 달라서다.
+function legendSwatch(s){
+  return s.dash
+    ? `background:repeating-linear-gradient(90deg,${s.color} 0 6px,transparent 6px 11px)`
+    : `background:${s.color}`;
+}
+
+function renderChartLegend(series, target){
+  const rows = series.map(s=>
+    `<div class="legend-item"><i style="${legendSwatch(s)}"></i><div><b>${esc(s.name)}</b><span>${esc(s.desc)}</span></div></div>`);
   rows.push(`<div class="legend-item"><i class="dash"></i><div><b>목표 은퇴자산</b><span>${fmtMoney(target)} · 희망 노후소득을 4% 인출률로 환산한 금액</span></div></div>`);
   $('chartLegend').innerHTML = rows.join('');
 }
 
-function drawChart(current, optimized, target, meta){
+function drawChart(series, target){
   const svg=$('projectionChart');
   // 재계산 응답이 비어 오면 at(-1) 접근에서 터진다. 그릴 게 없으면 조용히 비운다.
-  if(!Array.isArray(current) || !Array.isArray(optimized) || !current.length || !optimized.length){
-    svg.innerHTML=''; $('chartLegend').innerHTML=''; chartState=null; return;
-  }
-  meta = meta || {};
-  const W=980,H=360,L=70,R=26,T=24,B=45,iw=W-L-R,ih=H-T-B; const all=[...current,...optimized].map(x=>Number(x.value)); const max=Math.max(target,...all)*1.1; const last=Math.max(current.at(-1).year,optimized.at(-1).year); const x=y=>L+(y/last)*iw; const y=v=>T+ih-(v/max)*ih; const pts=s=>s.map(d=>`${x(d.year).toFixed(1)},${y(d.value).toFixed(1)}`).join(' '); let html='';
+  const lines=(series||[]).filter(s=>Array.isArray(s.points) && s.points.length);
+  if(!lines.length){ svg.innerHTML=''; $('chartLegend').innerHTML=''; chartState=null; return; }
+  const W=980,H=360,L=70,R=26,T=24,B=45,iw=W-L-R,ih=H-T-B; const all=lines.flatMap(s=>s.points.map(d=>Number(d.value))); const max=Math.max(target,...all)*1.1; const last=Math.max(...lines.map(s=>s.points.at(-1).year)); const x=y=>L+(y/last)*iw; const y=v=>T+ih-(v/max)*ih; const pts=s=>s.map(d=>`${x(d.year).toFixed(1)},${y(d.value).toFixed(1)}`).join(' '); let html='';
   for(let i=0;i<=5;i++){const val=max*i/5,yy=y(val);html+=`<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="${CHART_INK.grid}"/><text x="${L-9}" y="${yy+4}" text-anchor="end" fill="${CHART_INK.axis}" font-size="10">${fmtMoney(val)}</text>`;}
   const ty=y(target); html+=`<line x1="${L}" y1="${ty}" x2="${W-R}" y2="${ty}" stroke="${CHART_COLORS.target}" stroke-width="2" stroke-dasharray="7 7"/><text x="${W-R}" y="${Math.max(12,ty-7)}" text-anchor="end" fill="${CHART_COLORS.target}" font-size="10">목표</text>`;
-  html+=`<polyline points="${pts(current)}" fill="none" stroke="${CHART_COLORS.current}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="${pts(optimized)}" fill="none" stroke="${CHART_COLORS.optimized}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
+  // 파선(가입 상품)을 나중에 그려 실선 위에 올린다. 두 상품의 값이 가까울 때
+  // 파선이 실선 밑에 깔려 사라지는 쪽보다, 실선 위에 얹혀 끊긴 자국을 남기는 쪽이 읽힌다.
+  [...lines].sort((a,b)=>(a.dash?1:0)-(b.dash?1:0)).forEach(s=>{
+    const dash = s.dash ? ' stroke-dasharray="5 7"' : '';
+    html+=`<polyline points="${pts(s.points)}" fill="none" stroke="${s.color}" stroke-width="${s.dash?3:4}"${dash} stroke-linecap="round" stroke-linejoin="round"/>`;
+  });
   [0,Math.round(last/2),last].forEach(t=>html+=`<text x="${x(t)}" y="${H-13}" text-anchor="middle" fill="${CHART_INK.axis}" font-size="10">${t}년</text>`);
   // 히트 영역이 먼저 와서 선들 뒤에 깔리고, 툴팁 레이어는 그 위에 얹되 이벤트를 가로채지 않는다.
   html+=`<rect id="chartHit" x="${L}" y="${T}" width="${iw}" height="${ih}" fill="transparent" style="cursor:crosshair"/>`;
   html+=`<g id="chartHover" style="pointer-events:none;display:none"></g>`;
   svg.innerHTML=html;
 
-  chartState={current, optimized, target, meta, L, T, iw, ih, W, last, x, y, series:chartSeriesInfo(meta)};
-  renderChartLegend(meta, target);
+  chartState={target, L, T, iw, ih, W, last, x, y, series:lines};
+  renderChartLegend(lines, target);
 }
 
 // SVG에는 텍스트 폭을 미리 재는 수단이 없어 근사한다. 한글은 글자폭이 폰트 크기와 거의 같고
@@ -1026,14 +1076,14 @@ function showChartHover(year){
   const st=chartState, g=document.getElementById('chartHover');
   if(!st || !g) return;
   const rows=st.series.map(s=>{
-    const d=(s.key==='current'?st.current:st.optimized).find(v=>v.year===year);
+    const d=s.points.find(v=>v.year===year);
     return d ? {...s, value:Number(d.value), age:d.age} : null;
   }).filter(Boolean);
   if(!rows.length){ hideChartHover(); return; }
 
   const cx=st.x(year), FS=11, LH=16, PAD=10;
   const title = rows[0].age!=null ? `${year}년 후 · 만 ${rows[0].age}세` : `${year}년 후`;
-  const lines = rows.map(r=>({color:r.color, text:`${r.short}  ${fmtMoney(r.value)}`}));
+  const lines = rows.map(r=>({color:r.color, dash:r.dash, text:`${r.short}  ${fmtMoney(r.value)}`}));
   // 목표선은 연도와 무관하게 일정하지만, 전망과 목표의 거리가 이 그래프의 핵심이라
   // 매 지점에서 두 값을 나란히 읽을 수 있도록 함께 적는다.
   lines.push({color:CHART_COLORS.target, dash:true, text:`목표 은퇴자산  ${fmtMoney(st.target)}`});
