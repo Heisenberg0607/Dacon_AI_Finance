@@ -14,6 +14,17 @@ document.querySelectorAll('input[type="number"]').forEach(input => {
   });
 });
 
+// 임금상승률은 % 단위로 소수점 셋째 자리까지 허용한다.
+// 배포된 HTML이 오래된 경우에도 브라우저의 step 검증이 0.1로 남지 않도록
+// 런타임에서 동일한 제약을 다시 적용한다.
+const wageGrowthInput = $('wageGrowthRate');
+if(wageGrowthInput){
+  wageGrowthInput.min = '-5';
+  wageGrowthInput.max = '20';
+  wageGrowthInput.step = '0.001';
+  wageGrowthInput.inputMode = 'decimal';
+}
+
 function fmtMoney(v){
   // v18: 내부 금액은 만원 스케일을 유지하고, 3단계에서는 실제 원화 숫자로 표시한다.
   // 예: 5,000 -> 50,000,000
@@ -237,7 +248,7 @@ async function previewWageEstimate(){
     if(!res.ok) throw new Error(await res.text());
     const estimate=await res.json();
     const mapping=estimate.occupation_mapping || {};
-    $('wageGrowthRate').value=Number(estimate.predicted_growth_rate).toFixed(2);
+    $('wageGrowthRate').value=Number(estimate.predicted_growth_rate).toFixed(3);
     $('wageGrowthHint').textContent=mapping.fallback
       ? `깨움 AI가 현재 나이·연소득·직종을 기반으로 추정했습니다. 원하면 직접 수정할 수 있습니다. 이 값은 은퇴까지 고정 적용되는 상수가 아니라 최초 3년 AI 추정값입니다. 직종 매핑 불확실, 기타(-1.0) 기준.`
       : `깨움 AI가 현재 나이·연소득·직종을 기반으로 추정했습니다. 원하면 직접 수정할 수 있습니다. 이 값은 은퇴까지 고정 적용되는 상수가 아니라 최초 3년 AI 추정값입니다. 직종 코드 ${mapping.category}.`;

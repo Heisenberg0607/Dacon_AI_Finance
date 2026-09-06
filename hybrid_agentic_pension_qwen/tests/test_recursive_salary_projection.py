@@ -64,6 +64,24 @@ def test_project_api_accepts_manual_first_block(predictions):
     assert response.json()['projection_method'] == 'recursive_constant_annual_rate_scenario'
 
 
+def test_project_api_accepts_three_decimal_override_and_recursively_repredicts(predictions):
+    response = TestClient(app).post('/api/salary-growth/project', json={
+        'current_age': 32, 'retirement_age': 41, 'current_salary': 5000,
+        'occupation': '213.0', 'initial_growth_override': 5.321,
+    })
+    assert response.status_code == 200
+    result = response.json()
+    assert result['blocks'][0]['final_growth'] == 5.321
+    assert [call[0] for call in predictions] == [32, 35, 38]
+    assert result['blocks'][0]['growth_source'] == 'user_first_block_override'
+    assert result['blocks'][1]['growth_source'] == 'catboost_m3'
+    assert result['blocks'][2]['growth_source'] == 'catboost_m3'
+    assert result['blocks'][1]['start_salary'] == pytest.approx(
+        5000 * (1 + 5.321 / 100) ** 3,
+        abs=0.01,
+    )
+
+
 @pytest.mark.parametrize('operation', ['DB', 'DC'])
 def test_finance_uses_recursive_salary_path(predictions, operation):
     user = UserPensionInput.model_validate({
