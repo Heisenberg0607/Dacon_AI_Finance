@@ -792,17 +792,25 @@ function renderReport(r){
 // renderReport와 상품 비교 재계산이 같은 경로를 쓰도록 해서 차트와 숫자가 어긋나지 않게 한다.
 // 여기서 다루지 않는 보고서 본문(종합요약·전략·근거·검증)은 항상 가입 상품 기준으로 남는다.
 function renderProjection(r){
-  const isDB = r.user.operation_type === 'DB';
+  // v35: DB 비교 중에는 시나리오가 IRP라 숫자 칸도 DC/IRP 방식으로 그려야 한다.
+  // r.user는 원본(DB) 그대로이므로 시나리오 운영유형을 따로 받는다.
+  const isDB = (r.scenarioOperationType || r.user.operation_type) === 'DB';
   const f=r.finance, mc=r.monte_carlo, o=r.optimizer;
   $('goalRate').textContent=fmtPct(f.goal_rate_pct);
   $('mProbability').textContent=fmtPct(mc.success_probability_pct,1);
+  // 라벨도 여기서 함께 바꾼다. renderReport가 한 번 찍어놓은 DB 문구를 그대로 두면,
+  // DB 비교 중에 '예상 DB 퇴직급여'라고 적힌 칸에 상품 운용 금액이 들어가 거짓말이 된다(v35).
   if(isDB){
+    $('mFutureLabel').textContent='예상 DB 퇴직급여';
     $('mFuture').textContent=fmtMoney(f.estimated_db_benefit ?? f.future_asset);
     $('mFutureSmall').textContent=`임금상승률 ${Number(f.wage_growth_rate_pct||0).toFixed(2)}% 가정`;
+    $('mProbabilitySmall').textContent='임금경로 몬테카를로';
     $('allocationBars').innerHTML='<div class="db-allocation-note">DB형은 개인 자산배분 최적화 대신 예상 DB 급여와 희망 노후소득의 Gap을 분석합니다.</div>';
   }else{
+    $('mFutureLabel').textContent='예상 은퇴자산';
     $('mFuture').textContent=fmtMoney(f.future_asset);
     $('mFutureSmall').textContent=f.calculation_basis==='selected_product_pdf'?'선택 상품 PDF 기반 계산':'추출 실패 fallback 계산';
+    $('mProbabilitySmall').textContent='몬테카를로 시뮬레이션';
     renderAllocation(o.recommended_allocation);
   }
   $('optimizedGoal').textContent=fmtPct(o.goal_rate_pct,1);
@@ -817,32 +825,50 @@ let compareResult = null;
 let compareVisible = false;
 let compareBusy = false;
 
+// v35: DB형도 비교한다. DB 가입자는 개인 선택 상품이 없으므로 비교 대상을 사업자부터 고른다.
+function compareIsDB(){ return !!compareBaseline && compareBaseline.user.operation_type === 'DB'; }
+
 function setupCompare(r){
   compareBaseline = r;
   compareResult = null;
   compareVisible = false;
   const bar=$('compareBar');
-  // DB형은 개인 선택 상품이 없어 비교 대상이 존재하지 않는다.
-  if(r.user.operation_type === 'DB'){ bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden');
   $('compareStatus').classList.add('hidden');
   $('compareNote').classList.add('hidden');
   $('compareToggleBtn').classList.add('hidden');
 
-  // 사업자는 가입 상품 기준으로 고정한다. 사업자를 넘나드는 비교는 사용자가 당장 실행할 수 없는
-  // 선택지라, 같은 사업자 안에서 상품만 갈아보는 쪽이 실제로 행동으로 옮길 수 있는 비교다.
-  $('compareProviderLabel').textContent = r.user.provider;
+  const isDB = r.user.operation_type === 'DB';
+  // DC/IRP는 사업자를 가입 상품 기준으로 고정한다. 사업자를 넘나드는 비교는 사용자가 당장
+  // 실행할 수 없는 선택지라, 같은 사업자 안에서 상품만 갈아보는 쪽이 행동으로 옮길 수 있다.
+  // DB는 사정이 다르다. 가입 상품도 사업자도 없으므로(입력 폼에서 받지 않는다) 고정할 기준이
+  // 아예 없고, 어차피 '지금 없는 선택지'를 보여주는 비교라 사업자를 열어 둔다.
+  $('compareProviderFixed').classList.toggle('hidden', isDB);
+  $('compareProviderPick').classList.toggle('hidden', !isDB);
+  if(isDB){
+    const providers=[...new Set((catalog.products||[]).map(x=>x.provider).filter(Boolean))]
+      .sort((a,b)=>String(a).localeCompare(String(b),'ko'));
+    $('compareProvider').innerHTML=providers.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
+  }else{
+    $('compareProviderLabel').textContent = r.user.provider;
+  }
   fillCompareProducts();
 }
 
+function comparePickedProvider(){
+  return compareIsDB() ? $('compareProvider').value : compareBaseline.user.provider;
+}
+
 function fillCompareProducts(){
-  const provider = compareBaseline.user.provider;
+  const provider = comparePickedProvider();
+  const isDB = compareIsDB();
   // catalog.products에는 title이 겹치는 항목이 있어 그대로 채우면 같은 상품이 여러 번 뜬다.
-  // 가입 상품 자체도 뺀다. 남겨두면 기본 선택이 곧 지금 화면이라 계산 버튼이 아무것도
-  // 바꾸지 않는 것처럼 보이고, 그 자리는 '가입 상품으로 되돌리기'가 이미 맡고 있다.
+  // DC/IRP는 가입 상품 자체도 뺀다. 남겨두면 기본 선택이 곧 지금 화면이라 계산 버튼이 아무것도
+  // 바꾸지 않는 것처럼 보인다. DB는 뺄 가입 상품이 없다.
   const seen = new Set();
   const items = (catalog.products||[]).filter(x=>{
-    if(x.provider !== provider || x.title === compareBaseline.user.product_name || seen.has(x.title)) return false;
+    if(x.provider !== provider || seen.has(x.title)) return false;
+    if(!isDB && x.title === compareBaseline.user.product_name) return false;
     seen.add(x.title);
     return true;
   }).sort((a,b)=>String(a.title).localeCompare(String(b.title),'ko'));
@@ -856,9 +882,13 @@ function fillCompareProducts(){
 
 function compareStatusText(d){
   const p=d.product;
-  // 아래 숫자 칸은 고른 상품 하나만 보여주지만 그래프에는 네 선이 함께 있다.
+  const head=`비교용 시뮬레이션 · ${p.provider} ${p.product_name} (${p.investment_type}) 기준`;
+  // 아래 숫자 칸은 고른 상품 하나만 보여주지만 그래프에는 여러 선이 함께 있다.
   // 그 차이를 적어두지 않으면 숫자와 그래프가 어긋난 것처럼 보인다.
-  return `비교용 시뮬레이션 · ${p.product_name} (${p.investment_type}) 기준 · 그래프는 가입 상품(파선)과 고른 상품(실선)을 함께 그립니다 · 아래 숫자와 보고서 본문·챗봇은 각각 고른 상품, 가입 상품 기준입니다.`;
+  if(d.db_scenario){
+    return `${head} · 그래프는 지금의 DB 예상 퇴직급여(파선)와 이 상품으로 운용했을 때(실선)를 함께 그립니다 · 아래 숫자는 이 상품 기준이고, 보고서 본문·챗봇은 DB 분석 그대로입니다.`;
+  }
+  return `${head} · 그래프는 가입 상품(파선)과 고른 상품(실선)을 함께 그립니다 · 아래 숫자와 보고서 본문·챗봇은 각각 고른 상품, 가입 상품 기준입니다.`;
 }
 
 async function runCompare(){
@@ -876,7 +906,7 @@ async function runCompare(){
   $('compareStatus').classList.remove('hidden');
   try{
     const res=await postJson('/api/reproject',
-      {analysis_id:analysisId, provider:compareBaseline.user.provider, product_name:title});
+      {analysis_id:analysisId, provider:comparePickedProvider(), product_name:title});
     if(res.status===404){ analysisId=null; throw new CompareError('분석 결과가 만료되었습니다. 다시 분석해주세요.'); }
     if(!res.ok) throw new CompareError(await httpErrorMessage(res, '선택한 상품을 다시 계산하지 못했습니다.'));
     const d=await res.json();
@@ -906,14 +936,28 @@ function showCompareNote(d, base){
   // (최적화 자산배분은 투자유형을 따르므로 이때도 바뀐다.) 이유를 밝히지 않으면 고장으로 보인다.
   const note=$('compareNote');
   const source=(d.product_extraction||{}).source;
-  const sameProjection = d.finance.future_asset === base.finance.future_asset
+  const lines=[];
+
+  // v35: DB 비교는 서버가 적립금·납입액을 유도해 만든 가상 시나리오다. 그 근거를 밝히지 않으면
+  // 사용자가 입력한 적 없는 숫자가 화면에 나타난 것처럼 보인다. 항상 적는다.
+  if(d.db_scenario){
+    const s=d.db_scenario;
+    lines.push(`${s.note} (적용값 — 현재 적립금 ${fmtMoney(s.current_savings)} · 연간 납입액 ${fmtMoney(s.annual_contribution)})`);
+  }
+
+  // Qwen 없이 도는 최소 추출은 구성비중만 읽고 자산군을 전부 원리금보장으로 분류한다.
+  // 그래서 상품을 바꿔도 기대수익률이 같아 예상 은퇴자산과 목표달성률이 그대로다.
+  // (최적화 자산배분은 투자유형을 따르므로 이때도 바뀐다.) 이유를 밝히지 않으면 고장으로 보인다.
+  // DB 비교는 애초에 계산식이 달라 기준선과 같아질 일이 없으므로 이 안내를 붙이지 않는다.
+  const sameProjection = !d.db_scenario
+    && d.finance.future_asset === base.finance.future_asset
     && d.monte_carlo.success_probability_pct === base.monte_carlo.success_probability_pct;
   if(source !== 'qwen_pdf_extraction' && sameProjection){
-    note.textContent='API 키가 없어 상품 PDF 구조화를 최소 추출로 대체했습니다. 자산군이 구분되지 않아 예상 은퇴자산과 목표달성률은 상품을 바꿔도 같게 나오고, 최적화 자산배분만 투자유형에 따라 달라집니다.';
-    note.classList.remove('hidden');
-  }else{
-    note.classList.add('hidden');
+    lines.push('API 키가 없어 상품 PDF 구조화를 최소 추출로 대체했습니다. 자산군이 구분되지 않아 예상 은퇴자산과 목표달성률은 상품을 바꿔도 같게 나오고, 최적화 자산배분만 투자유형에 따라 달라집니다.');
   }
+
+  note.textContent = lines.join(' ');
+  note.classList.toggle('hidden', !lines.length);
 }
 
 /* ---- v33: 비교를 껐다 켜는 토글 ---- */
@@ -933,9 +977,10 @@ function renderCompareView(){
     const d=compareResult;
     // 원본 user는 유지한 채 상품 관련 계산 결과만 갈아끼워 같은 렌더 경로를 태운다.
     // compareBaseline을 함께 넘겨 가입 상품 두 선을 같은 그래프에 남긴다(v32).
+    // DB 비교의 시나리오는 IRP라, 숫자 칸도 DB가 아니라 DC/IRP 방식으로 그려야 한다(v35).
     renderProjection({user: compareBaseline.user, finance: d.finance, monte_carlo: d.monte_carlo,
                       optimizer: d.optimizer, projectionProductName: d.product.product_name,
-                      compareBaseline});
+                      scenarioOperationType: d.product.operation_type, compareBaseline});
   }else{
     renderProjection(compareBaseline);
   }
@@ -943,7 +988,7 @@ function renderCompareView(){
   const btn=$('compareToggleBtn');
   btn.classList.toggle('hidden', !compareResult);
   if(compareResult){
-    btn.textContent = on ? '가입 상품만 보기' : '비교 상품 함께 보기';
+    btn.textContent = on ? (compareIsDB() ? 'DB 급여만 보기' : '가입 상품만 보기') : '비교 상품 함께 보기';
     btn.setAttribute('aria-pressed', String(on));
   }
 
@@ -968,6 +1013,8 @@ function toggleCompare(){
 
 $('compareBtn').addEventListener('click', runCompare);
 $('compareToggleBtn').addEventListener('click', toggleCompare);
+// DB 비교에서 사업자를 바꾸면 그 사업자의 상품으로 목록을 다시 채운다(v35).
+$('compareProvider').addEventListener('change', fillCompareProducts);
 
 function renderAllocation(allocation){ $('allocationBars').innerHTML=Object.entries(allocation||{}).map(([k,v])=>`<div class="allocation-row"><span>${esc(k)}</span><div class="allocation-track"><div class="allocation-fill" style="width:${Math.max(0,Math.min(100,Number(v)))}%"></div></div><strong>${fmtPct(v,1)}</strong></div>`).join(''); }
 /* ---- v22: 전망 그래프 범례 + 마우스 오버 툴팁 ---- */
@@ -992,13 +1039,32 @@ let chartState = null;
 // 가지고 있던 뜻(구성비중 vs 최적화)도 비교 전후로 흔들리지 않는다.
 function chartSeries(r){
   const f=r.finance, o=r.optimizer, base=r.compareBaseline;
+  const baselineIsDB = (base ? base.user : r.user).operation_type === 'DB';
+
   // DB형은 optimizer.series가 finance.series와 같은 배열이라 두 선이 완전히 겹친다.
   // 없는 구분을 범례에 적으면 오히려 거짓말이 되므로 한 줄로만 그린다.
-  if(r.user.operation_type === 'DB'){
+  if(baselineIsDB && !base){
     return [{key:'current', color:CHART_COLORS.current, points:f.series,
              name:'예상 퇴직급여 (DB)', short:'예상 퇴직급여 (DB)',
              desc:`임금상승률 ${Number(f.wage_growth_rate_pct||0).toFixed(2)}% 가정 · 근속연수 누적`}];
   }
+
+  // v35: DB 비교는 선이 셋이다. 기준선이 DB 급여 하나뿐이라 파선도 하나만 나온다.
+  // 파선 = 지금(DB), 실선 = 이 상품으로 운용했을 때. 규칙은 상품 비교와 같다.
+  if(baselineIsDB){
+    return [
+      {key:'base-current', color:CHART_COLORS.current, dash:true, points:(base.finance||{}).series,
+       name:'지금 · DB 예상 퇴직급여', short:'DB 급여',
+       desc:`임금상승률 ${Number((base.finance||{}).wage_growth_rate_pct||0).toFixed(2)}% 가정 · 근속연수 누적`},
+      {key:'current', color:CHART_COLORS.current, points:f.series, short:'고른 상품',
+       name:`이 상품으로 운용 · ${r.projectionProductName||'비교 상품'}`,
+       desc:'같은 조건으로 DC/IRP에서 이 상품에 운용했을 때의 전망'},
+      {key:'optimized', color:CHART_COLORS.optimized, points:o.series,
+       name:'고른 상품의 최적화 자산배분', short:'고른 최적화',
+       desc:'고른 상품의 투자유형으로 최적화했을 때의 전망'},
+    ];
+  }
+
   if(!base){
     return [
       {key:'current', color:CHART_COLORS.current, points:f.series, short:'가입 상품 기준',

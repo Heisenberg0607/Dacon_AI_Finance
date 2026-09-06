@@ -229,20 +229,51 @@ def reproject(request: ReprojectRequest):
         raise HTTPException(status_code=404, detail='분석 결과가 만료되었습니다. 다시 분석해주세요.')
 
     user = session['user']
-    if user.operation_type == 'DB':
-        return {'applicable': False, 'note': 'DB형은 개인 선택 상품이 없어 상품 비교를 적용하지 않습니다.'}
 
     product = rag.resolve_product(request.provider, request.product_name)
     if product is None:
         raise HTTPException(status_code=404, detail='선택한 상품과 일치하는 PDF를 찾지 못했습니다.')
 
     # 기준 입력은 그대로 두고 상품만 갈아끼운다. 투자유형은 카탈로그의 risk_type을 따른다.
-    scenario_user = UserPensionInput.model_validate({
+    payload = {
         **user.model_dump(),
         'provider': product.get('provider') or request.provider,
         'product_name': product.get('title') or request.product_name,
         'investment_type': product.get('risk_type') or user.investment_type,
-    })
+    }
+
+    # v35: DB형도 비교할 수 있게 한다. DB 가입자는 개인 선택 상품이 없으므로 '같은 조건으로
+    # DC/IRP에서 이 상품에 운용했다면'을 계산해 DB 예상급여와 나란히 놓는다.
+    #
+    # 적립금·납입액은 지어내지 않고 DB 계산이 이미 쓰는 값에서 그대로 끌어온다.
+    #   현재 적립금  = 월평균임금 × 현재 근속연수  (지금 퇴직하면 받을 DB 급여 = 이전될 금액)
+    #   연간 납입액  = 연간 임금총액의 1/12       (근퇴법상 DC 최소 사용자부담금)
+    # 이 둘은 DB 적립 속도(근속 1년당 월평균임금 1개월분)와 같은 값이라, 두 선의 차이는
+    # 적립액이 아니라 '운용수익이 붙느냐'만 남는다. 비교의 축이 하나로 정리된다.
+    db_scenario = None
+    if user.operation_type == 'DB':
+        monthly_wage = float(user.annual_income) / 12.0
+        derived_savings = monthly_wage * float(user.current_tenure_years or 0)
+        payload.update({
+            'operation_type': 'IRP',
+            'current_savings': round(derived_savings, 2),
+            'annual_contribution': round(monthly_wage, 2),
+        })
+        db_scenario = {
+            'current_savings': round(derived_savings, 2),
+            'annual_contribution': round(monthly_wage, 2),
+            'monthly_wage_proxy': round(monthly_wage, 2),
+            'current_tenure_years': user.current_tenure_years,
+            'note': (
+                'DB 가입자는 개인 선택 상품이 없어, 같은 조건으로 DC/IRP에서 이 상품에 운용했을 때를 '
+                '계산해 비교합니다. 현재 적립금은 월평균임금 × 현재 근속연수(지금 퇴직 시 받을 DB 급여), '
+                '연간 납입액은 연간 임금총액의 1/12(근퇴법상 DC 최소 사용자부담금)로 두었습니다. '
+                'DB 선은 임금상승률을 따라 오르지만 이 상품 선의 납입액은 고정이므로, 상품 쪽에 '
+                '불리한 방향의 보수적 비교입니다.'
+            ),
+        }
+
+    scenario_user = UserPensionInput.model_validate(payload)
 
     extraction = workflow._extract_selected_product(scenario_user)
     finance = finance_engine_tool(scenario_user, extraction)
@@ -255,7 +286,10 @@ def reproject(request: ReprojectRequest):
             'provider': scenario_user.provider,
             'product_name': scenario_user.product_name,
             'investment_type': scenario_user.investment_type,
+            # 화면은 이 값으로 숫자 칸을 DB 기준이 아니라 DC/IRP 기준으로 그린다.
+            'operation_type': scenario_user.operation_type,
         },
+        'db_scenario': db_scenario,
         'product_extraction': extraction,
         'finance': finance,
         'monte_carlo': monte_carlo,

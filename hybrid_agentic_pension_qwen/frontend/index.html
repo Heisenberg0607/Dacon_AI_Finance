@@ -304,10 +304,15 @@
                보고서 본문은 가입 상품 기준으로 유지되므로 인쇄에서는 제외한다. -->
           <div class="compare-bar no-print" id="compareBar">
             <div class="compare-fields">
-              <div class="compare-field">
+              <!-- DC/IRP는 가입 사업자로 고정, DB는 가입 상품 자체가 없으므로 사업자부터 고른다(v35). -->
+              <div class="compare-field" id="compareProviderFixed">
                 <span>사업자</span>
                 <strong class="compare-fixed" id="compareProviderLabel"></strong>
               </div>
+              <label class="compare-field hidden" id="compareProviderPick">
+                <span>사업자</span>
+                <select id="compareProvider"></select>
+              </label>
               <label class="compare-field wide">
                 <span>비교할 상품</span>
                 <select id="compareProduct"></select>
@@ -371,6 +376,6 @@
   </main>
 
   <footer>깨움 KKAEUM · 당신의 AI 연금분석 에이전트</footer>
-  <script src="/static/app.js?v=44"></script>
+  <script src="/static/app.js?v=46"></script>
 </body>
 </html>
