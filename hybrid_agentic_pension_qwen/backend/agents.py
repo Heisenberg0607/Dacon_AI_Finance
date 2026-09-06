@@ -12,6 +12,7 @@ from .formatting import (
     won_amount as _won_amount,
 )
 from .guardrails import guarantee_phrase_issues, invalid_citation_issues, money_unit_issues
+from .report_presentation import REPORT_PROSE_RULES, clean_report_prose
 from .models import UserPensionInput
 from .product_extractor import ProductExtractionAgent
 from .qwen_client import QwenGateway
@@ -392,7 +393,7 @@ class HybridAgenticWorkflow:
 
     def _recommendation_agent(self, user: UserPensionInput, context: dict, critique: str | None = None) -> dict:
         if not self.qwen.enabled:
-            return self._fallback_recommendation(user, context)
+            return clean_report_prose(self._fallback_recommendation(user, context))
         payload = {
             'user': user.model_dump(),
             'profile': context['profile'],
@@ -427,11 +428,11 @@ class HybridAgenticWorkflow:
             '스키마: {"summary":str,"diagnosis":[str],"actions":[str],"product_analysis":str,"reason_codes":[str],"citations":["E1"],"disclaimer":str}'
         )
         resp = self.qwen.chat([
-            {'role': 'system', 'content': system},
+            {'role': 'system', 'content': system + REPORT_PROSE_RULES},
             {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)},
         ], temperature=0.2)
         parsed = self.qwen.parse_json(resp.choices[0].message.content or '', {})
-        return parsed if parsed.get('summary') else self._fallback_recommendation(user, context)
+        return clean_report_prose(parsed if parsed.get('summary') else self._fallback_recommendation(user, context))
 
     def _deterministic_critic_checks(self, user: UserPensionInput, recommendation: dict, context: dict) -> list[str]:
         issues = []
@@ -578,7 +579,7 @@ class HybridAgenticWorkflow:
 
     def _report_agent(self, user: UserPensionInput, context: dict, recommendation: dict, critic: dict) -> dict:
         if not self.qwen.enabled:
-            return self._fallback_report(user, context, recommendation, critic)
+            return clean_report_prose(self._fallback_report(user, context, recommendation, critic))
         payload = {
             'user': user.model_dump(),
             'context': context,
@@ -606,13 +607,13 @@ class HybridAgenticWorkflow:
             '스키마: {"title":str,"executive_summary":str,"current_status":[str],"product_analysis":str,"strategy":[str],"simulation_comment":str,"risk_notes":[str],"evidence_ids":[str],"critic_status":str}'
         )
         resp = self.qwen.chat([
-            {'role': 'system', 'content': system},
+            {'role': 'system', 'content': system + REPORT_PROSE_RULES},
             {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)},
         ], temperature=0.2)
         parsed = self.qwen.parse_json(resp.choices[0].message.content or '', {})
         if parsed.get('title') and not _contains_converted_money_unit(parsed):
-            return parsed
-        return self._fallback_report(user, context, recommendation, critic)
+            return clean_report_prose(parsed)
+        return clean_report_prose(self._fallback_report(user, context, recommendation, critic))
 
     @staticmethod
     def _stage_durations(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
