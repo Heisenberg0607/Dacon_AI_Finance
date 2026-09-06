@@ -11,7 +11,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 
-MODEL_PATH = Path(os.getenv('MODEL_PATH', 'models/catboost_m3.cbm'))
+MODEL_PATH = Path(os.getenv('MODEL_PATH', str(Path(__file__).resolve().parent / 'models' / 'catboost_m3.cbm')))
 MODEL_API_KEY = os.getenv('MODEL_API_KEY', '').strip()
 
 EXPECTED_FEATURES = ['log_wage_t', 'age', 'occupation']
