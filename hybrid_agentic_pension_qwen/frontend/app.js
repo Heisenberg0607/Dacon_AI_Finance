@@ -821,9 +821,9 @@ function renderReport(r){
     $('dbInsights').classList.add('hidden');
     $('currentProduct').textContent=u.product_name || '-';
     const ext=r.product_extraction||{};
-    const alloc=(ext.asset_allocation||[]).map(x=>`${x.component_name} ${Number(x.weight_pct||0).toFixed(1).replace('.0','')}%`).join(' · ');
-    const extractionLine=ext.source_filename ? `\n\nPDF 구조화: ${ext.source_filename}${alloc?` / ${alloc}`:''}` : '';
-    $('productAnalysis').textContent=(rep.product_analysis || rec.product_analysis || '') + extractionLine;
+    // v38: 'PDF 구조화: 파일명 / 구성비중' 줄을 뺐다. 파일명은 바로 아래 원문 PDF
+    // 버튼에 이미 있고, 구성상품과 비중은 윗 문단이 문장으로 설명한다.
+    $('productAnalysis').textContent=rep.product_analysis || rec.product_analysis || '';
     setSourcePdfLink(ext.source_document_available ? ext.source_file_id : null, ext.source_filename);
   }
 
