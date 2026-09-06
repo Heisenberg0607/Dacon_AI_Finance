@@ -65,7 +65,7 @@
             <span>AI 임금 상승 예측</span>
             <div class="inline-control">
               <span class="inline-field-label">향후 3년 예상 연평균 임금상승률</span>
-              <div class="unit-input grow"><input id="wageGrowthRate" type="number" min="-5" max="20" step="0.001" placeholder="향후 3년 예상" aria-describedby="wageGrowthManualHint wageGrowthPrecisionHint wageGrowthHint" /><em>%</em></div>
+              <div class="unit-input grow"><input id="wageGrowthRate" type="text" inputmode="decimal" pattern="-?[0-9]+(\.[0-9]{0,3})?" autocomplete="off" placeholder="향후 3년 예상" aria-describedby="wageGrowthManualHint wageGrowthPrecisionHint wageGrowthHint" /><em>%</em></div>
               <button id="estimateWageBtn" class="estimate-btn" type="button">깨움이 추정</button>
             </div>
             <small id="wageGrowthManualHint" class="field-hint">수동으로 수정 가능합니다</small>

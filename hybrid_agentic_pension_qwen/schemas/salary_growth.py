@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -26,6 +28,14 @@ class SalaryGrowthPredictResponse(BaseModel):
 class SalaryGrowthProjectRequest(SalaryGrowthPredictRequest):
     retirement_age: int = Field(ge=18, le=90)
     initial_growth_override: float | None = Field(default=None, ge=-5, le=20)
+
+    @model_validator(mode='after')
+    def validate_growth_precision(self):
+        if self.initial_growth_override is not None:
+            decimal_value = Decimal(str(self.initial_growth_override)).normalize()
+            if max(0, -decimal_value.as_tuple().exponent) > 3:
+                raise ValueError('initial_growth_override must have at most 3 decimal places')
+        return self
 
     @model_validator(mode='after')
     def validate_retirement_age(self):

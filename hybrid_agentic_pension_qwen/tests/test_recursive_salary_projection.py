@@ -82,6 +82,15 @@ def test_project_api_accepts_three_decimal_override_and_recursively_repredicts(p
     )
 
 
+def test_project_api_rejects_more_than_three_decimal_places():
+    response = TestClient(app).post('/api/salary-growth/project', json={
+        'current_age': 32, 'retirement_age': 41, 'current_salary': 5000,
+        'occupation': '213.0', 'initial_growth_override': 5.3214,
+    })
+    assert response.status_code == 422
+    assert '3 decimal places' in response.text
+
+
 @pytest.mark.parametrize('operation', ['DB', 'DC'])
 def test_finance_uses_recursive_salary_path(predictions, operation):
     user = UserPensionInput.model_validate({

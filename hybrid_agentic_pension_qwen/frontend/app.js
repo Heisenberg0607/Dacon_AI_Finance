@@ -23,6 +23,31 @@ if(wageGrowthInput){
   wageGrowthInput.max = '20';
   wageGrowthInput.step = '0.001';
   wageGrowthInput.inputMode = 'decimal';
+  const precisionHint = $('wageGrowthPrecisionHint');
+
+  const normalizeWageGrowthInput = () => {
+    const raw = wageGrowthInput.value;
+    if(raw === '' || raw === '-' || raw === '.' || raw === '-.') return;
+
+    // 브라우저별 number input 동작 차이와 붙여넣기를 모두 같은 규칙으로 처리한다.
+    // 소수부 네 번째 자리부터는 버림하여 항상 최대 소수점 셋째 자리만 남긴다.
+    const match = raw.match(/^(-?\d+)(?:\.(\d*))?$/);
+    if(!match) {
+      wageGrowthInput.value = '';
+      return;
+    }
+    if((match[2] || '').length > 3 && precisionHint){
+      precisionHint.hidden = false;
+      precisionHint.textContent = '소수점 세자리까지 입력 가능합니다!';
+    }
+    const fraction = (match[2] || '').slice(0, 3);
+    // `5.`는 사용자가 다음 숫자를 입력하기 전의 정상적인 중간 상태다.
+    // 이 점을 보존해야 다음 입력이 5.3으로 이어지고 53처럼 밀리지 않는다.
+    wageGrowthInput.value = raw.endsWith('.') ? `${match[1]}.` : (fraction ? `${match[1]}.${fraction}` : match[1]);
+  };
+
+  wageGrowthInput.addEventListener('input', normalizeWageGrowthInput);
+  wageGrowthInput.addEventListener('blur', normalizeWageGrowthInput);
 }
 
 function fmtMoney(v){
@@ -226,6 +251,12 @@ function nullableNumber(id){
   if(raw === '' || raw == null) return null;
   const n=Number(raw);
   return Number.isFinite(n) ? n : null;
+}
+
+function validWageGrowthRate(){
+  const value = nullableNumber('wageGrowthRate');
+  if(value === null) return true;
+  return value >= -5 && value <= 20;
 }
 
 async function previewWageEstimate(){
@@ -637,6 +668,11 @@ $('pensionForm').addEventListener('submit', async(e)=>{
   e.preventDefault();
   const data=payload();
   if(data.retirement_age<=data.age){ alert('은퇴 나이는 현재 나이보다 커야 합니다.'); return; }
+  if(!validWageGrowthRate()){
+    alert('임금상승률은 -5%에서 20% 사이로 입력해주세요.');
+    $('wageGrowthRate').focus();
+    return;
+  }
   const btn=$('submitBtn'); btn.disabled=true; btn.querySelector('span').textContent='AI 분석 중...';
   $('inputView').classList.add('hidden'); $('workflowView').classList.remove('hidden'); $('reportView').classList.add('hidden');
   $('modeBadge').textContent='AI 분석 진행 중';
