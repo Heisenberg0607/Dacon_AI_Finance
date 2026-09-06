@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>깨움 KKAEUM</title>
-  <link rel="stylesheet" href="/static/styles.css?v=34" />
+  <link rel="stylesheet" href="/static/styles.css?v=35" />
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -276,6 +276,9 @@
             <p class="mini-kicker">현재 분석 대상</p>
             <h4 id="currentProduct">-</h4>
             <p id="productAnalysis"></p>
+            <!-- v37: DB형은 고를 상품도 바꿀 자산배분도 없다. 계산 방식 설명 대신
+                 사용자가 판단에 쓰는 값을 적는다. DC/IRP에서는 비어 있다. -->
+            <div id="dbInsights" class="db-insights hidden"></div>
             <!-- 분석 근거가 된 상품설명서 원문. 종이 보고서에는 링크가 무의미하므로 인쇄에서 뺀다. -->
             <a id="sourcePdfBtn" class="source-pdf-btn no-print hidden" href="#">
               <span aria-hidden="true">↓</span>
@@ -363,6 +366,6 @@
   </main>
 
   <footer>깨움 KKAEUM · 당신의 AI 연금분석 에이전트</footer>
-  <script src="/static/app.js?v=48"></script>
+  <script src="/static/app.js?v=49"></script>
 </body>
 </html>
