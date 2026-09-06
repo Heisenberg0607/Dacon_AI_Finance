@@ -597,3 +597,18 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 .source-pdf-btn:hover b{text-decoration:underline;text-underline-offset:2px}
 .source-pdf-btn:hover>span{background:var(--accent);color:#ffffff}
 .source-pdf-btn:focus-visible{outline:2px solid var(--info);outline-offset:3px;border-radius:6px}
+
+/* v37: DB 급여 분석 — 계산 방식 대신 사용자가 판단에 쓰는 값 */
+/* 항목마다 '값'이 먼저 읽혀야 하므로 라벨은 작게 위로 올리고 금액을 키운다.
+   미니 패널 안이라 폭이 좁다. 한 줄에 하나씩 세로로 쌓는다. */
+.db-insights{display:grid;gap:10px;margin-top:4px}
+.db-insights>div{
+  border:1px solid var(--line);border-radius:12px;background:#ffffff;padding:11px 12px;
+}
+.db-insights span{display:block;color:var(--muted);font-size:10px;letter-spacing:.02em}
+.db-insights strong{
+  display:block;margin:5px 0 4px;color:var(--accent);
+  font-size:17px;letter-spacing:-.02em;overflow-wrap:anywhere;
+}
+.db-insights small{display:block;color:var(--muted);font-size:11px;line-height:1.6}
+@media print{.db-insights>div{border-color:#ddd;background:white}.db-insights strong{color:#1a4bc0}}

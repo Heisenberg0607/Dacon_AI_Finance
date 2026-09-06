@@ -437,6 +437,43 @@ def product_market_inputs(product_extraction: dict[str, Any] | None, investment_
     }
 
 
+def _db_user_insights(user: UserPensionInput, series: list[dict[str, Any]],
+                      benefit: float, target: float) -> dict[str, Any]:
+    """DB 가입자가 자기 상황을 판단할 때 쓰는 값들.
+
+    DB는 개인이 고를 상품도, 바꿀 자산배분도 없다. 그래서 계산 방식을 설명해봐야
+    사용자가 할 수 있는 일이 없다. 대신 '지금 퇴직하면 얼마', '1년 더 다니면 얼마',
+    '이 전망이 임금 상승에 얼마나 기대고 있나'처럼 사용자가 실제로 판단에 쓰는
+    값만 결정론적으로 계산해 넘긴다. 단위는 내부 스케일인 만원.
+    """
+    today = series[0]
+    monthly_wage_now = float(today['annual_income']) / 12
+    total_tenure = user.total_expected_tenure_years or float(today['tenure_years'])
+
+    # 임금이 지금 수준에서 멈춘다면. 예상액의 얼마가 '앞으로 오른다는 전제'에서
+    # 나온 몫인지 보여준다. 전망이 무엇에 기대고 있는지가 곧 위험의 크기다.
+    flat_wage_benefit = monthly_wage_now * total_tenure
+    months_left = max(user.years_to_retirement * 12, 1)
+    gap = target - benefit
+
+    return {
+        'benefit_today': round(float(today['value']), 2),
+        'tenure_today_years': round(float(today['tenure_years']), 1),
+        'one_more_year_gain': (round(float(series[1]['value']) - float(today['value']), 2)
+                               if len(series) > 1 else None),
+        'monthly_wage_now': round(monthly_wage_now, 2),
+        'monthly_wage_at_retirement': round(float(series[-1]['annual_income']) / 12, 2),
+        'gap': round(gap, 2),
+        # 운용수익을 빼고 남은 기간 동안 매달 따로 모아야 하는 금액. 수익률 가정이
+        # 들어가지 않으므로 '적어도 이만큼'이라는 하한이 된다.
+        'monthly_saving_to_close_gap': round(gap / months_left, 2) if gap > 0 else 0.0,
+        'months_left': months_left,
+        'flat_wage_benefit': round(flat_wage_benefit, 2),
+        'wage_growth_share_pct': (round((benefit - flat_wage_benefit) / benefit * 100, 1)
+                                  if benefit else 0.0),
+    }
+
+
 def finance_engine_tool(user: UserPensionInput, product_extraction: dict[str, Any] | None = None) -> dict[str, Any]:
     target = user.desired_monthly_income * 12 / WITHDRAWAL_RATE
 
@@ -480,6 +517,7 @@ def finance_engine_tool(user: UserPensionInput, product_extraction: dict[str, An
             'goal_rate_pct': round(benefit / target * 100, 1),
             'withdrawal_rate_assumption': WITHDRAWAL_RATE,
             'series': series,
+            'db_insights': _db_user_insights(user, series, benefit, target),
             'calculation_note': calculation_note + ' ' + ((salary_projection.get('continuation') or {}).get('note', '')),
         }
 
