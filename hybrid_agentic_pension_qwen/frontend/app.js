@@ -755,8 +755,29 @@ function setSourcePdfLink(fileId, filename){
   btn.classList.remove('hidden');
 }
 
+// Apply at display time as well, including reports restored from saved results.
+function cleanReportText(value){
+  return String(value)
+    .replace(/\\+_/g, '_')
+    .replace(/[`"']*(?:[A-Za-z_]+\.)*risk_level_verified[`"']*(?:\s*[=:]\s*[`"']*(?:false|true|null)[`"']*)?/gi, '')
+    .replace(/[（(\[]\s*(?:(?:근거|출처)\s*:?\s*)?E\d{1,3}(?:\s*[,;·/]\s*E\d{1,3})*\s*[）)\]]/g, '')
+    .replace(/[（(\[]\s*[）)\]]/g, '')
+    .replace(/[ \t]+([,.;:!?])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+function cleanReportProse(payload){
+  const result={...payload};
+  for(const key of ['summary','diagnosis','actions','product_analysis','disclaimer','title','executive_summary','current_status','strategy','simulation_comment','risk_notes']){
+    if(typeof result[key] === 'string') result[key]=cleanReportText(result[key]);
+    else if(Array.isArray(result[key])) result[key]=result[key].map(x=>typeof x === 'string' ? cleanReportText(x) : x);
+  }
+  return result;
+}
+
 function renderReport(r){
-  const u=r.user, f=r.finance, mc=r.monte_carlo, o=r.optimizer, rep=r.report, rec=r.recommendation;
+  const u=r.user, f=r.finance, mc=r.monte_carlo, o=r.optimizer, rep=cleanReportProse(r.report), rec=cleanReportProse(r.recommendation);
   const isDB = u.operation_type === 'DB';
   $('reportTitleTop').textContent=rep.title||'AI 퇴직연금 건강검진 보고서';
   $('reportTitle').textContent=rep.title||'AI 퇴직연금 건강검진 보고서';

@@ -25,12 +25,19 @@ _FLAG = re.compile(
     r'`?[\w.]*[A-Za-z]\w*_(?:\w+_)*\w+\s*[=:]\s*(?:false|true|null)\b`?',
     re.IGNORECASE,
 )
+_RISK_FIELD = re.compile(
+    r"[`\"']*(?:[A-Za-z_]+\.)*risk_level_verified[`\"']*"
+    r"(?:\s*[=:]\s*[`\"']*(?:false|true|null)[`\"']*)?",
+    re.IGNORECASE,
+)
 
 
 def clean_report_text(text: str) -> str:
     text = _CITATION_GROUP.sub('', text)
     # Markdown may escape underscores in JSON field names.
-    text = _FLAG.sub('', text.replace(r'\_', '_'))
+    text = re.sub(r'\\+_', '_', text)
+    text = _RISK_FIELD.sub('', text)
+    text = _FLAG.sub('', text)
     text = re.sub(r'[（(\[]\s*[）)\]]', '', text)
     text = re.sub(r'(?<![A-Za-z0-9])E\d{1,3}(?![A-Za-z0-9])', '', text)
     text = re.sub(r'[ \t]+([,.;:!?])', r'\1', text)
