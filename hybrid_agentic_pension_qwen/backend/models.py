@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 
 InvestmentType = Literal['안정형', '안정투자형', '중립투자형', '적극투자형']
@@ -9,6 +9,8 @@ OperationType = Literal['DB', 'DC', 'IRP']
 
 
 class UserPensionInput(BaseModel):
+    # Request-local only: never serialized into prompts, responses or stored profiles.
+    _salary_projection_cache: dict = PrivateAttr(default_factory=dict)
     # 공통 입력
     age: int = Field(ge=18, le=70)
     retirement_age: int = Field(ge=40, le=85)
@@ -19,6 +21,7 @@ class UserPensionInput(BaseModel):
     # DC / IRP 전용
     current_savings: float | None = Field(default=None, ge=0, description='현재 적립금, 만원')
     annual_contribution: float | None = Field(default=None, ge=0, description='연간 납입액, 만원')
+    personal_additional_contribution: float | None = Field(default=None, ge=0, description='DC personal additional contribution, manwon')
     provider: str | None = Field(default=None, max_length=80)
     product_name: str | None = Field(default=None, max_length=180)
     investment_type: InvestmentType | None = None
@@ -44,6 +47,7 @@ class UserPensionInput(BaseModel):
             # DB는 개인 투자상품/투자유형/개인 적립금 납입 정보를 사용하지 않음
             self.current_savings = None
             self.annual_contribution = None
+            self.personal_additional_contribution = None
             self.product_name = None
             self.investment_type = None
             if not self.provider:
@@ -61,10 +65,12 @@ class UserPensionInput(BaseModel):
                 raise ValueError('DC/IRP는 투자 유형이 필요합니다.')
             # DB 전용값은 분석에서 사용하지 않음
             self.current_tenure_years = None
-            self.wage_growth_rate = None
-            self.industry_job = None
             self.company_size = None
             self.salary_history = []
+            if self.operation_type != 'DC':
+                self.wage_growth_rate = None
+                self.industry_job = None
+                self.personal_additional_contribution = None
         return self
 
     @property

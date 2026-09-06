@@ -1,0 +1,8 @@
+# CatBoost binary model is no longer used by the Vercel runtime.
+models/salary_growth/catboost_m3.cbm
+
+# Local/dev-only files
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.venv/

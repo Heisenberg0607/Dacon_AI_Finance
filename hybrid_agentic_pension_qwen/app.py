@@ -7,7 +7,7 @@ import time
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.agents import HybridAgenticWorkflow
@@ -25,6 +25,8 @@ from backend.tools import (
     monte_carlo_tool,
     portfolio_optimizer_tool,
 )
+from routers.salary_growth import router as salary_growth_router
+from services.salary_growth.predictor import SalaryGrowthArtifactError, SalaryGrowthRequiredError, get_salary_growth_predictor
 
 FRONTEND = ROOT / 'frontend'
 
@@ -37,7 +39,13 @@ run_times = RunTimeHistory()
 source_documents = SourceDocumentStore()
 
 app = FastAPI(title='깨움 KKAEUM - Hybrid Agentic AI Workflow', version='1.9.0')
+
+
+@app.exception_handler(SalaryGrowthRequiredError)
+async def salary_prediction_required_handler(request, exc):
+    return JSONResponse(status_code=503, content={'detail': str(exc)})
 app.mount('/static', StaticFiles(directory=FRONTEND), name='static')
+app.include_router(salary_growth_router)
 
 
 @app.get('/')
@@ -47,6 +55,10 @@ def index():
 
 @app.get('/api/health')
 def health():
+    try:
+        salary_growth = get_salary_growth_predictor().validate_artifacts()
+    except SalaryGrowthArtifactError as exc:
+        salary_growth = {'ok': False, 'error': str(exc)}
     return {
         'ok': True,
         'qwen_enabled': qwen.enabled,
@@ -54,6 +66,7 @@ def health():
         'rag_mode': rag.mode,
         'documents': len(rag.catalog),
         'chunks': len(rag.chunks),
+        'salary_growth': salary_growth,
     }
 
 
@@ -189,6 +202,8 @@ def analyze_stream(user: UserPensionInput):
                 result['analysis_id'] = analysis_store.put(user, result)
                 run_times.record(user.operation_type, time.perf_counter() - started, qwen.enabled)
                 events.put({'type': 'result', 'result': result})
+            except SalaryGrowthRequiredError as exc:
+                events.put({'type': 'error', 'message': str(exc)})
             except Exception as exc:  # noqa: BLE001 - 실패도 스트림으로 알려야 화면이 멈추지 않는다
                 events.put({'type': 'error', 'message': f'{type(exc).__name__}: {exc}'})
             finally:
