@@ -810,10 +810,15 @@ function renderReport(r){
 
   if(isDB){
     $('currentProduct').textContent='DB 급여 분석';
-    $('productAnalysis').textContent=`개인 운용상품 대신 현재 연소득, 근속연수, CatBoost M3 임금 예측과 age curve 보정을 이용해 예상 DB 퇴직급여를 계산했습니다. ${f.calculation_note||''}`;
+    // v37: 계산 방식 설명을 걷어내고 사용자가 판단에 쓰는 값을 적는다.
+    // 방식 설명은 '주요 리스크'의 계산 근거 줄에 그대로 남아 있어 사라지지 않는다.
+    $('productAnalysis').classList.add('hidden');
+    renderDbInsights(f);
     // DB형은 개인 선택 상품이 없어 내려받을 원문도 없다.
     setSourcePdfLink(null, null);
   }else{
+    $('productAnalysis').classList.remove('hidden');
+    $('dbInsights').classList.add('hidden');
     $('currentProduct').textContent=u.product_name || '-';
     const ext=r.product_extraction||{};
     const alloc=(ext.asset_allocation||[]).map(x=>`${x.component_name} ${Number(x.weight_pct||0).toFixed(1).replace('.0','')}%`).join(' · ');
@@ -833,6 +838,35 @@ function renderReport(r){
   renderProjection(r);
   setupCompare(r);
   setupChat(r);
+}
+
+// v37: DB 가입자에게 계산 방식 대신 판단에 쓰는 값을 보여준다.
+// DB는 고를 상품도 바꿀 자산배분도 없어서, 방식을 설명해봐야 사용자가 할 수 있는 일이 없다.
+// 숫자는 전부 서버가 결정론적으로 계산해 내려준 값(finance.db_insights)이다.
+function renderDbInsights(f){
+  const box=$('dbInsights'), d=f.db_insights;
+  if(!d){ box.innerHTML=''; box.classList.add('hidden'); return; }
+  const rows=[];
+  rows.push(['지금 퇴직하면', `${fmtMoney(d.benefit_today)}원`,
+             `근속 ${d.tenure_today_years}년까지 쌓인 금액입니다.`]);
+  if(d.one_more_year_gain!=null){
+    rows.push(['1년 더 다니면', `+${fmtMoney(d.one_more_year_gain)}원`,
+               '근속 1년과 그 해 임금 인상이 함께 반영된 증가분입니다.']);
+  }
+  rows.push(['은퇴 시 월평균임금', `${fmtMoney(d.monthly_wage_at_retirement)}원`,
+             `지금은 ${fmtMoney(d.monthly_wage_now)}원입니다. DB 급여는 마지막 임금 수준이 전체 금액을 좌우합니다.`]);
+  if(d.gap>0){
+    rows.push(['목표까지 부족액', `${fmtMoney(d.gap)}원`,
+               `남은 ${d.months_left}개월 동안 매달 ${fmtMoney(d.monthly_saving_to_close_gap)}원씩 따로 모으면 메웁니다. 운용수익을 빼고 더하기만 한 금액이라 실제로 필요한 액수의 하한입니다.`]);
+  }else{
+    rows.push(['목표 대비', `${fmtMoney(-d.gap)}원 초과`,
+               '희망 노후소득으로 환산한 목표자산을 이미 넘어섭니다.']);
+  }
+  rows.push(['임금 상승에 기댄 몫', fmtPct(d.wage_growth_share_pct,1),
+             `임금이 지금 수준에서 멈추면 ${fmtMoney(d.flat_wage_benefit)}원입니다. 전망의 이만큼은 앞으로 임금이 오른다는 전제 위에 있습니다.`]);
+  box.innerHTML=rows.map(([k,v,s])=>
+    `<div><span>${esc(k)}</span><strong>${esc(v)}</strong><small>${esc(s)}</small></div>`).join('');
+  box.classList.remove('hidden');
 }
 
 // v21: 선택 상품에 따라 달라지는 부분만 모아둔다.
