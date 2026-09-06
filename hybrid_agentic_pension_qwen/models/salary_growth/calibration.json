@@ -1,0 +1,7 @@
+{
+  "method": "bias",
+  "intercept": 1.540357211507906,
+  "slope": 1.0,
+  "selection": "3-fold person-group cross-validation within validation only; 0.1% simplicity tolerance",
+  "validation_only": true
+}

@@ -6,8 +6,18 @@ from fastapi.testclient import TestClient
 from app import app
 from backend.models import UserPensionInput
 from backend.tools import finance_engine_tool
-from services.salary_growth.predictor import get_salary_growth_predictor
+from services.salary_growth.predictor import get_salary_growth_predictor, SalaryGrowthPredictor, SalaryGrowthRequiredError
 from services.salary_growth.projector import SalaryGrowthProjectionUnsupported, SalaryGrowthProjector
+
+
+@pytest.fixture(autouse=True)
+def mock_occupation_llm(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(SalaryGrowthPredictor, '_occupation_gateway', SimpleNamespace(enabled=True))
+    monkeypatch.setattr(
+        SalaryGrowthPredictor, '_classify_occupation',
+        lambda self, raw: '-1.0' if raw == 'not-a-category' else '223.0',
+    )
 
 
 @pytest.fixture(scope='module')
@@ -20,7 +30,7 @@ def test_artifact_load_and_feature_order(predictor):
     assert checks['ok'] is True
     assert checks['feature_order'] == ['log_wage_t', 'age', 'occupation']
     assert checks['feature_order_matches_metadata'] is True
-    assert checks['smoke_test_reload_identical'] is True
+    assert checks['model_loaded'] is True
 
 
 def test_predict_supported_occupation_matches_smoke_test(predictor):
@@ -28,7 +38,7 @@ def test_predict_supported_occupation_matches_smoke_test(predictor):
     expected = predictor.smoke_test['sample_prediction']['prediction_avg_annual_growth_pp']
     assert result['prediction_horizon_years'] == 3
     assert result['predicted_growth_rate'] == pytest.approx(expected, abs=1e-6)
-    assert result['projection_supported'] is False
+    assert result['projection_supported'] is True
     assert result['occupation_mapping']['category'] == '-1.0'
 
 
@@ -45,9 +55,9 @@ def test_unknown_natural_language_occupation_falls_back(predictor):
     assert result['occupation_mapping']['fallback'] is True
 
 
-def test_natural_language_occupation_keyword_mapping(predictor):
+def test_natural_language_occupation_llm_mapping(predictor):
     result = predictor.predict(current_age=32, current_salary=5000, occupation='금융 데이터 분석가')
-    assert result['occupation_mapping']['source'] == 'keyword_mapping'
+    assert result['occupation_mapping']['source'] == 'llm_mapping'
     assert result['occupation_mapping']['category'] in predictor.occupation_categories
     assert result['occupation_mapping']['fallback'] is False
 
@@ -57,7 +67,8 @@ def test_current_salary_validation(predictor):
         predictor.predict(current_age=32, current_salary=0, occupation='-1.0')
 
 
-def test_projection_rejects_non_cagr_target(predictor):
+def test_projection_rejects_target_without_projection_method(predictor, monkeypatch):
+    monkeypatch.delitem(predictor.metadata['target'], 'projection_method')
     with pytest.raises(SalaryGrowthProjectionUnsupported):
         SalaryGrowthProjector(predictor).project(
             current_age=32,
@@ -85,7 +96,7 @@ def test_api_predict_and_project():
     })
     assert predict_response.status_code == 200
     assert predict_response.json()['model'] == 'catboost_m3'
-    assert predict_response.json()['occupation_mapping']['source'] == 'keyword_mapping'
+    assert predict_response.json()['occupation_mapping']['source'] == 'llm_mapping'
 
     project_response = client.post('/api/salary-growth/project', json={
         'current_age': 32,
@@ -93,11 +104,14 @@ def test_api_predict_and_project():
         'current_salary': 5000,
         'occupation': '-1.0',
     })
-    assert project_response.status_code == 409
-    assert 'CAGR' in project_response.json()['detail']
+    assert project_response.status_code == 200
+    assert len(project_response.json()['blocks']) == 10
 
 
-def test_db_finance_falls_back_when_projection_target_is_not_cagr():
+def test_db_finance_stops_when_projection_is_unavailable(monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise SalaryGrowthProjectionUnsupported('Test unavailable projection')
+    monkeypatch.setattr(SalaryGrowthProjector, 'project', unavailable)
     user = UserPensionInput.model_validate({
         'age': 32,
         'retirement_age': 60,
@@ -107,13 +121,34 @@ def test_db_finance_falls_back_when_projection_target_is_not_cagr():
         'current_tenure_years': 3,
         'industry_job': '금융 데이터 분석가',
     })
+    with pytest.raises(SalaryGrowthRequiredError):
+        finance_engine_tool(user)
+
+
+@pytest.mark.parametrize('growth_rate', [3.123, -1.234, 0.001])
+def test_db_finance_preserves_three_decimal_wage_growth(growth_rate, monkeypatch):
+    monkeypatch.setattr(SalaryGrowthPredictor, 'predict',
+                        lambda *args, **kwargs: {'predicted_growth_rate': 2.0})
+    user = UserPensionInput.model_validate({
+        'age': 32,
+        'retirement_age': 60,
+        'annual_income': 5000,
+        'desired_monthly_income': 250,
+        'operation_type': 'DB',
+        'current_tenure_years': 3,
+        'wage_growth_rate': growth_rate,
+    })
     result = finance_engine_tool(user)
-    assert result['calculation_basis'] == 'wage_growth_rate_fallback'
-    assert result['salary_projection'] is None
-    assert 'fallback' in result['calculation_note']
+    assert result['wage_growth_rate_pct'] == growth_rate
+    assert result['first_3y_wage_growth_rate_pct'] == growth_rate
+    expected_income = 5000 * (1 + growth_rate / 100) ** 3
+    assert result['salary_projection']['blocks'][0]['end_salary'] == round(expected_income, 2)
 
 
-def test_dc_finance_keeps_fixed_contribution_without_supported_salary_path():
+def test_dc_finance_stops_without_supported_salary_path(monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise SalaryGrowthProjectionUnsupported('Test unavailable projection')
+    monkeypatch.setattr(SalaryGrowthProjector, 'project', unavailable)
     user = UserPensionInput.model_validate({
         'age': 32,
         'retirement_age': 60,
@@ -128,6 +163,5 @@ def test_dc_finance_keeps_fixed_contribution_without_supported_salary_path():
         'investment_type': '중립투자형',
         'industry_job': '금융 데이터 분석가',
     })
-    result = finance_engine_tool(user)
-    assert result['salary_projection'] is None
-    assert result['contribution_projection_basis'] == 'fixed_annual_contribution'
+    with pytest.raises(SalaryGrowthRequiredError):
+        finance_engine_tool(user)

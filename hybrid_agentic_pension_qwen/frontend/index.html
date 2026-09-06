@@ -65,10 +65,13 @@
             <span>AI 임금 상승 예측</span>
             <div class="inline-control">
               <span class="inline-field-label">향후 3년 예상 연평균 임금상승률</span>
-              <div class="unit-input grow"><input id="wageGrowthRate" type="number" min="-5" max="20" step="0.1" placeholder="향후 3년 예상" /><em>%</em></div>
+              <div class="unit-input grow"><input id="wageGrowthRate" type="number" min="-5" max="20" step="0.001" placeholder="향후 3년 예상" aria-describedby="wageGrowthManualHint wageGrowthPrecisionHint wageGrowthHint" /><em>%</em></div>
               <button id="estimateWageBtn" class="estimate-btn" type="button">깨움이 추정</button>
             </div>
-            <small id="wageGrowthHint" class="field-hint">깨움 AI가 현재 나이·연소득·직종을 기반으로 추정했습니다. 원하면 직접 수정할 수 있습니다. 이 값은 은퇴까지 고정 적용되는 상수가 아니라 최초 3년 AI 추정값입니다.</small>
+            <small id="wageGrowthManualHint" class="field-hint">수동으로 수정 가능합니다</small>
+            <small class="field-hint">입력값은 최초 3년에 적용하며, 이후 3년마다 나이·예상 연봉으로 다시 추정합니다. 각 구간의 연간 상승률이 일정하다고 가정한 시뮬레이션입니다.</small>
+            <small id="wageGrowthPrecisionHint" class="field-hint" role="status" aria-live="polite" hidden>소수점 세자리까지 입력 가능합니다!</small>
+            <small id="wageGrowthHint" class="field-hint">깨움 AI가 현재 나이·연소득·직종을 기반으로 추정했습니다. 이 값은 은퇴까지 고정 적용되는 상수가 아니라 최초 3년 AI 추정값입니다.</small>
           </div>
         </div>
 

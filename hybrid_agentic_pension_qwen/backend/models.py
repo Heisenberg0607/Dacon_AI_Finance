@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 
 InvestmentType = Literal['안정형', '안정투자형', '중립투자형', '적극투자형']
@@ -9,6 +9,8 @@ OperationType = Literal['DB', 'DC', 'IRP']
 
 
 class UserPensionInput(BaseModel):
+    # Request-local only: never serialized into prompts, responses or stored profiles.
+    _salary_projection_cache: dict = PrivateAttr(default_factory=dict)
     # 공통 입력
     age: int = Field(ge=18, le=70)
     retirement_age: int = Field(ge=40, le=85)

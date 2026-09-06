@@ -1,0 +1,21 @@
+{
+  "method": "groups",
+  "weights": {
+    "1_3": 1.0,
+    "4_6": 1.0,
+    "7_10": 1.0,
+    "11_plus": 1.0
+  },
+  "block_years": 3,
+  "blending_validated": true,
+  "provisional": true,
+  "selected_candidate": "constant_1.0",
+  "validated_horizon_max": 5,
+  "structure_check_horizon_max": 3,
+  "unsupported_groups": [
+    "7_10",
+    "11_plus"
+  ],
+  "extrapolation": "No independent weights beyond available horizons; grouped weights carry last fitted value; decay extrapolates formula",
+  "selection_end_year": 2020
+}

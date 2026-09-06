@@ -17,6 +17,7 @@ from .product_extractor import ProductExtractionAgent
 from .qwen_client import QwenGateway
 from .rag import PensionRAG
 from .tools import finance_engine_tool, monte_carlo_tool, portfolio_optimizer_tool, profile_tool
+from services.salary_growth.predictor import SalaryGrowthRequiredError
 
 
 # 코드가 _deterministic_critic_checks에서 실제로 수행하는 검증 항목의 이름표.
@@ -327,6 +328,8 @@ class HybridAgenticWorkflow:
                         context[key] = result
                     trace.append({'stage': key, 'tool': name, 'status': 'done', 'selected_by': 'Qwen function calling', 'args': args})
                     tool_payload = result
+                except SalaryGrowthRequiredError:
+                    raise
                 except Exception as e:
                     trace.append({'stage': name, 'tool': name, 'status': 'error', 'selected_by': 'Qwen function calling', 'error': str(e)})
                     tool_payload = {'error': str(e)}
@@ -637,6 +640,8 @@ class HybridAgenticWorkflow:
         if self.qwen.enabled:
             try:
                 self._run_qwen_planner(user, context, trace)
+            except SalaryGrowthRequiredError:
+                raise
             except Exception as e:
                 trace.append({'stage': 'planner', 'tool': 'Pension AI Agent', 'status': 'error', 'selected_by': 'Qwen', 'error': str(e)})
 

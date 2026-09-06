@@ -49,6 +49,7 @@ def project_salary_growth(request: SalaryGrowthProjectRequest):
             retirement_age=request.retirement_age,
             current_salary=request.current_salary,
             occupation=request.occupation,
+            initial_growth_override=request.initial_growth_override,
         )
     except SalaryGrowthProjectionUnsupported as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

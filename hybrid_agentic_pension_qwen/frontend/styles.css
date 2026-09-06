@@ -29,6 +29,8 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 
 /* v3: operation type / DB-aware form behavior */
 .field-hint{display:block;margin-top:-2px;color:var(--muted);font-size:9px;line-height:1.45}
+.field-hint[hidden]{display:none}
+#wageGrowthPrecisionHint{color:var(--warning)}
 .field.is-hidden{display:none!important}
 .field select:disabled{opacity:.62;cursor:not-allowed;background:#fbfcfd;color:var(--muted)}
 .field-hint.db-note{color:var(--warning)}

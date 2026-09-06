@@ -1,13 +1,15 @@
 {
   "model_name": "salary_growth_catboost_m3",
-  "model_version": "2026-09-04-m3-rmse-catboost",
+  "model_version": "2026-09-06-m3-tuned-calibrated-lifecycle-v1",
   "created_at": "2026-09-04T20:49:22",
   "artifact_files": {
     "model": "export\\catboost_m3.cbm",
     "metadata": "export\\metadata.json",
     "occupation_categories": "export\\occupation_categories.json",
     "age_growth_curve": "export\\age_growth_curve.json",
-    "smoke_test": "export\\smoke_test.json"
+    "smoke_test": "export\\smoke_test.json",
+    "calibration": "calibration.json",
+    "blend_weights": "blend_weights.json"
   },
   "features": {
     "order": [
@@ -57,44 +59,45 @@
       "growth_1y_1_2": "wage_t2 / wage_t1 - 1",
       "growth_1y_2_3": "wage_t3 / wage_t2 - 1"
     },
-    "winsorization": "global 1st/99th percentile clipping on target_avg_wage_growth_t_to_t3 after target creation",
+    "winsorization": "Train-only 1st/99th percentile thresholds; existing cleaning and origin split retained",
     "is_cagr": false,
     "target_type": "arithmetic mean of three one-year simple wage growth rates",
     "prediction_transform": "none; CatBoost prediction is already in %p target scale",
-    "projection_warning": "This target is not CAGR. Do not directly compound it as salary * (1 + g) ** years for long-term projection without a projection-specific method or a separately trained CAGR target model."
+    "projection_method": "recursive_constant_annual_rate_scenario",
+    "projection_warning": "Recursive constant-rate scenario, not a CAGR conversion. Weights selected on historical outcomes through 2020; horizons above 5 years were not used to identify weights. 10/15-year accuracy is not observable in this panel. Long-term projection remains provisional."
   },
   "data_split": {
-    "train": {
-      "rule": "year <= 2018",
-      "rows_after_m3_preprocessing": 37741
-    },
-    "validation": {
-      "rule": "2019 <= year <= 2020",
-      "rows_after_m3_preprocessing": 11929
-    },
-    "test": {
-      "rule": "year == 2021, representing 2021 -> 2024",
-      "rows_after_m3_preprocessing": 6325
-    }
+    "train": "<=2018",
+    "validation": "2019-2020",
+    "test": "2021"
   },
   "metrics": {
     "train": {
-      "mae_pp": 7.155745274819448,
-      "rmse_pp": 10.084951524447293,
-      "r2": 0.26281859662084206,
-      "n": 37741
+      "split": "train",
+      "model": "bias",
+      "n": 37741,
+      "RMSE": 10.14403936891308,
+      "MAE": 7.422216768774552,
+      "R2": 0.2470333337301558,
+      "Mean_Error": 1.5942304947307215
     },
     "validation": {
-      "mae_pp": 7.006750112710869,
-      "rmse_pp": 10.37899229948878,
-      "r2": 0.2070820235826072,
-      "n": 11929
+      "split": "validation",
+      "model": "bias",
+      "n": 11929,
+      "RMSE": 10.196514115769103,
+      "MAE": 7.089345213671649,
+      "R2": 0.2260963259994223,
+      "Mean_Error": -7.624232557405721e-17
     },
     "test": {
-      "mae_pp": 7.064063742908314,
-      "rmse_pp": 10.605349485558321,
-      "r2": 0.1962428736705808,
-      "n": 6325
+      "split": "test",
+      "model": "bias",
+      "n": 6325,
+      "RMSE": 10.369427388261515,
+      "MAE": 7.100884615766111,
+      "R2": 0.2229306027537861,
+      "Mean_Error": -0.4726795538913302
     }
   },
   "catboost": {
@@ -105,7 +108,7 @@
         "Borders:CtrBorderCount=15:CtrBorderType=Uniform:TargetBorderCount=1:TargetBorderType=MinEntropy:Prior=0/1:Prior=0.5/1:Prior=1/1",
         "Counter:CtrBorderCount=15:CtrBorderType=Uniform:Prior=0/1"
       ],
-      "iterations": 3000,
+      "iterations": 2400,
       "sampling_frequency": "PerTree",
       "fold_permutation_block": 0,
       "leaf_estimation_method": "Newton",
@@ -118,12 +121,12 @@
       "model_shrink_mode": "Constant",
       "feature_border_type": "GreedyLogSum",
       "ctr_leaf_count_limit": 18446744073709551615,
-      "bayesian_matrix_reg": 0.10000000149011612,
+      "bayesian_matrix_reg": 0.1000000015,
       "one_hot_max_size": 2,
       "eval_fraction": 0,
       "force_unit_auto_pair_weights": false,
-      "l2_leaf_reg": 5,
-      "random_strength": 1,
+      "l2_leaf_reg": 18.81788063,
+      "random_strength": 2.135933399,
       "od_type": "Iter",
       "rsm": 1,
       "boost_from_average": true,
@@ -136,9 +139,8 @@
       "pool_metainfo_options": {
         "tags": {}
       },
-      "subsample": 0.800000011920929,
       "use_best_model": true,
-      "od_wait": 200,
+      "od_wait": 150,
       "random_seed": 42,
       "depth": 7,
       "ctr_target_border_count": 1,
@@ -146,6 +148,7 @@
       "has_time": false,
       "store_all_simple_ctr": false,
       "border_count": 254,
+      "bagging_temperature": 0.01355713047,
       "classes_count": 0,
       "auto_class_weights": "None",
       "sparse_features_conflict_fraction": 0,
@@ -154,11 +157,11 @@
       "model_shrink_rate": 0,
       "min_data_in_leaf": 1,
       "loss_function": "RMSE",
-      "learning_rate": 0.029999999329447743,
+      "learning_rate": 0.07190717012,
       "score_function": "Cosine",
       "task_type": "CPU",
       "leaf_estimation_iterations": 1,
-      "bootstrap_type": "MVS",
+      "bootstrap_type": "Bayesian",
       "max_leaves": 128,
       "permutation_count": 4
     },
@@ -167,8 +170,8 @@
       "age",
       "occupation"
     ],
-    "best_iteration": 1084,
-    "tree_count": 1085,
+    "best_iteration": 881,
+    "tree_count": 882,
     "cat_feature_indices": [
       2
     ],
@@ -229,5 +232,39 @@
       "converted_log_wage_t": 6.034683666227958,
       "prediction_avg_annual_growth_pp": 2.348135859726894
     }
+  },
+  "projection": {
+    "blending": {
+      "method": "groups",
+      "weights": {
+        "1_3": 1.0,
+        "4_6": 1.0,
+        "7_10": 1.0,
+        "11_plus": 1.0
+      },
+      "block_years": 3,
+      "blending_validated": true,
+      "provisional": true,
+      "selected_candidate": "constant_1.0",
+      "validated_horizon_max": 5,
+      "structure_check_horizon_max": 3,
+      "unsupported_groups": [
+        "7_10",
+        "11_plus"
+      ],
+      "extrapolation": "No independent weights beyond available horizons; grouped weights carry last fitted value; decay extrapolates formula",
+      "selection_end_year": 2020
+    }
+  },
+  "calibration": {
+    "method": "bias",
+    "intercept": 1.540357211507906,
+    "slope": 1.0,
+    "selection": "3-fold person-group cross-validation within validation only; 0.1% simplicity tolerance",
+    "validation_only": true
+  },
+  "evaluation_caveats": {
+    "fixed_split_caveat": "Preserved origin split is not a point-in-time forecast: validation outcomes extend to 2023. Separate nested rolling analysis is point-in-time.",
+    "prior_test_caveat": "Original 2021 test was already examined in previous notebook"
   }
 }

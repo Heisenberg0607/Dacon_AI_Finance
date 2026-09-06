@@ -25,6 +25,7 @@ class SalaryGrowthPredictResponse(BaseModel):
 
 class SalaryGrowthProjectRequest(SalaryGrowthPredictRequest):
     retirement_age: int = Field(ge=18, le=90)
+    initial_growth_override: float | None = Field(default=None, ge=-5, le=20)
 
     @model_validator(mode='after')
     def validate_retirement_age(self):
@@ -39,13 +40,13 @@ class SalaryProjectionBlock(BaseModel):
     block_years: int
     start_salary: float
     catboost_growth: float
-    raw_catboost_growth: float
+    raw_catboost_growth: float | None
     growth_source: str
     age_curve_growth: float
     age_curve_matched_age: int
     age_curve_clamped: bool
     years_from_now: int
-    model_weight: float
+    model_weight: float | None
     final_growth: float
     end_salary: float
 
@@ -56,6 +57,8 @@ class SalaryPathPoint(BaseModel):
 
 
 class SalaryGrowthProjectResponse(BaseModel):
+    continuation: dict | None = None
+    projection_method: str
     current_salary: float
     current_age: int
     retirement_age: int

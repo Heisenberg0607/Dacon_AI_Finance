@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from .models import UserPensionInput
-from services.salary_growth.predictor import SalaryGrowthArtifactError
+from services.salary_growth.predictor import SalaryGrowthArtifactError, SalaryGrowthRequiredError
 from services.salary_growth.projector import SalaryGrowthProjectionUnsupported, SalaryGrowthProjector
 
 # 투자유형별 값은 이제 '현재 가입상품 계산'에 쓰지 않는다.
@@ -120,7 +120,7 @@ def _history_cagr(history: list[float]) -> float | None:
 def estimate_wage_growth(user: UserPensionInput) -> dict[str, Any]:
     if user.wage_growth_rate is not None:
         return {
-            'rate_pct': round(float(user.wage_growth_rate), 2),
+            'rate_pct': float(user.wage_growth_rate),
             'source': 'user_input',
             'explanation': '사용자가 직접 입력한 예상 임금상승률을 사용했습니다.',
         }
@@ -248,14 +248,33 @@ def _db_benefit_projection(user: UserPensionInput, wage_growth_rate_pct: float):
     return series[-1]['value'], series
 
 
+def _cached_salary_projection(user: UserPensionInput) -> dict[str, Any]:
+    key = (user.age, user.retirement_age, user.annual_income,
+           user.industry_job or '', user.wage_growth_rate)
+    cache = user._salary_projection_cache
+    if key not in cache:
+        # Keep one scenario per user object; copies/edits with changed inputs recompute.
+        cache.clear()
+        try:
+            cache[key] = (SalaryGrowthProjector().project(
+                current_age=user.age,
+                retirement_age=user.retirement_age,
+                current_salary=user.annual_income,
+                occupation=user.industry_job or '',
+                initial_growth_override=user.wage_growth_rate,
+            ), None)
+        except (SalaryGrowthArtifactError, SalaryGrowthProjectionUnsupported) as exc:
+            # Do not retry a slow/unavailable service for every optimizer candidate.
+            cache[key] = (None, (type(exc), str(exc)))
+    projection, error = cache[key]
+    if error is not None:
+        error_type, message = error
+        raise SalaryGrowthRequiredError() from error_type(message)
+    return projection
+
+
 def _db_benefit_projection_from_salary_projector(user: UserPensionInput) -> dict[str, Any]:
-    projection = SalaryGrowthProjector().project(
-        current_age=user.age,
-        retirement_age=user.retirement_age,
-        current_salary=user.annual_income,
-        occupation=user.industry_job or '',
-        initial_growth_override=user.wage_growth_rate,
-    )
+    projection = _cached_salary_projection(user)
     salary_by_age = {int(point['age']): float(point['salary']) for point in projection['salary_path']}
     series = []
     for year in range(0, user.years_to_retirement + 1):
@@ -285,15 +304,9 @@ def _salary_projection_for_user(user: UserPensionInput) -> dict[str, Any] | None
     if user.operation_type not in {'DB', 'DC'}:
         return None
     try:
-        return SalaryGrowthProjector().project(
-            current_age=user.age,
-            retirement_age=user.retirement_age,
-            current_salary=user.annual_income,
-            occupation=user.industry_job or '',
-            initial_growth_override=user.wage_growth_rate,
-        )
-    except (SalaryGrowthArtifactError, SalaryGrowthProjectionUnsupported):
-        return None
+        return _cached_salary_projection(user)
+    except (SalaryGrowthArtifactError, SalaryGrowthProjectionUnsupported) as exc:
+        raise SalaryGrowthRequiredError() from exc
 
 
 def _dc_contribution_schedule_from_salary_path(user: UserPensionInput, salary_projection: dict[str, Any] | None) -> dict[int, float] | None:
@@ -431,7 +444,7 @@ def finance_engine_tool(user: UserPensionInput, product_extraction: dict[str, An
         try:
             projected = _db_benefit_projection_from_salary_projector(user)
             wage = {
-                'rate_pct': round(projected['first_block_growth_rate_pct'], 2),
+                'rate_pct': round(projected['first_block_growth_rate_pct'], 3),
                 'source': 'catboost_m3_salary_projector',
             }
             benefit = float(projected['benefit'])
@@ -442,15 +455,11 @@ def finance_engine_tool(user: UserPensionInput, product_extraction: dict[str, An
             calculation_note = (
                 'DB 예상급여는 단일 임금상승률을 은퇴까지 고정 적용하지 않고, '
                 'CatBoost M3 3년 예측을 재귀적으로 갱신하면서 장기 구간은 age curve로 보정했습니다. '
+                '각 3년 구간에서는 예측한 산술평균 상승률이 매년 일정하다고 가정한 시나리오이며 CAGR 변환값이 아닙니다. '
                 '현재 blending rule은 provisional이며 historical backtest로 검증 전입니다.'
             )
         except (SalaryGrowthArtifactError, SalaryGrowthProjectionUnsupported) as exc:
-            wage = estimate_wage_growth(user)
-            benefit, series = _db_benefit_projection(user, wage['rate_pct'])
-            retirement_income = user.annual_income * ((1 + wage['rate_pct'] / 100) ** user.years_to_retirement)
-            salary_projection = None
-            calculation_basis = 'wage_growth_rate_fallback'
-            calculation_note = f'CatBoost salary projector를 사용할 수 없어 기존 임금상승률 기반 fallback으로 계산했습니다. reason={exc}'
+            raise SalaryGrowthRequiredError() from exc
         gap = target - benefit
         return {
             'engine_type': 'DB_BENEFIT_ENGINE',
@@ -471,7 +480,7 @@ def finance_engine_tool(user: UserPensionInput, product_extraction: dict[str, An
             'goal_rate_pct': round(benefit / target * 100, 1),
             'withdrawal_rate_assumption': WITHDRAWAL_RATE,
             'series': series,
-            'calculation_note': calculation_note,
+            'calculation_note': calculation_note + ' ' + ((salary_projection.get('continuation') or {}).get('note', '')),
         }
 
     market = product_market_inputs(product_extraction, user.investment_type)
@@ -497,7 +506,7 @@ def finance_engine_tool(user: UserPensionInput, product_extraction: dict[str, An
         'goal_rate_pct': round(future / target * 100, 1),
         'withdrawal_rate_assumption': WITHDRAWAL_RATE,
         'series': series,
-        'calculation_note': market['note'],
+        'calculation_note': market['note'] + ' ' + (((salary_projection or {}).get('continuation') or {}).get('note', '')),
     }
 
 
@@ -520,10 +529,8 @@ def monte_carlo_tool(
             else:
                 mu = projected['first_block_growth_rate_pct'] / 100.0
             wage_source = 'catboost_m3_salary_projector'
-        except (SalaryGrowthArtifactError, SalaryGrowthProjectionUnsupported):
-            wage = estimate_wage_growth(user)
-            mu = wage['rate_pct'] / 100.0
-            wage_source = wage['source']
+        except (SalaryGrowthArtifactError, SalaryGrowthProjectionUnsupported) as exc:
+            raise SalaryGrowthRequiredError() from exc
         sigma = 0.015
         seed_text = f'DB|{user.age}|{user.retirement_age}|{user.annual_income}|{user.current_tenure_years}|{mu}'
         seed = int(hashlib.sha256(seed_text.encode('utf-8')).hexdigest()[:8], 16)
@@ -541,7 +548,7 @@ def monte_carlo_tool(
             'p10': round(float(np.percentile(values, 10)), 2),
             'p50': round(float(np.percentile(values, 50)), 2),
             'p90': round(float(np.percentile(values, 90)), 2),
-            'assumed_wage_growth_pct': round(mu * 100, 2),
+            'assumed_wage_growth_pct': round(mu * 100, 3),
             'wage_growth_source': wage_source,
             'wage_growth_volatility_pct': round(sigma * 100, 2),
         }
@@ -636,7 +643,7 @@ def portfolio_optimizer_tool(user: UserPensionInput, product_extraction: dict[st
         scenarios = []
         for label, rate in [('보수적', max(0.5, wage - 1.0)), ('기준', wage), ('낙관적', min(8.0, wage + 1.0))]:
             benefit, _ = _db_benefit_projection(user, rate)
-            scenarios.append({'label': label, 'wage_growth_rate_pct': round(rate, 2), 'estimated_db_benefit': round(benefit, 2), 'goal_rate_pct': round(benefit / target * 100, 1)})
+            scenarios.append({'label': label, 'wage_growth_rate_pct': round(rate, 3), 'estimated_db_benefit': round(benefit, 2), 'goal_rate_pct': round(benefit / target * 100, 1)})
         return {
             'analysis_type': 'DB_GAP_ANALYZER',
             'portfolio_optimization_applicable': False,

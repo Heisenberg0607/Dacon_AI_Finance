@@ -217,6 +217,21 @@ function nullableNumber(id){
   return Number.isFinite(n) ? n : null;
 }
 
+function limitWageGrowthPrecision(raw){
+  // Normalize exponent notation too, so pasted values cannot bypass the limit.
+  if(/e/i.test(raw) && Number.isFinite(Number(raw))) return Number(raw).toFixed(3);
+  const match = raw.match(/^(-?\d*\.\d{3})\d+/);
+  return match ? match[1] : raw;
+}
+
+if($('wageGrowthRate')) $('wageGrowthRate').addEventListener('input', (event)=>{
+  const input=event.target;
+  const limited=limitWageGrowthPrecision(input.value);
+  const exceeded=limited !== input.value;
+  if(exceeded) input.value=limited;
+  $('wageGrowthPrecisionHint').hidden=!exceeded;
+});
+
 async function previewWageEstimate(){
   const btn=$('estimateWageBtn');
   if(!btn) return;
@@ -237,7 +252,8 @@ async function previewWageEstimate(){
     if(!res.ok) throw new Error(await res.text());
     const estimate=await res.json();
     const mapping=estimate.occupation_mapping || {};
-    $('wageGrowthRate').value=Number(estimate.predicted_growth_rate).toFixed(2);
+    $('wageGrowthRate').value=Number(estimate.predicted_growth_rate).toFixed(3);
+    $('wageGrowthPrecisionHint').hidden=true;
     $('wageGrowthHint').textContent=mapping.fallback
       ? `깨움 AI가 현재 나이·연소득·직종을 기반으로 추정했습니다. 원하면 직접 수정할 수 있습니다. 이 값은 은퇴까지 고정 적용되는 상수가 아니라 최초 3년 AI 추정값입니다. 직종 매핑 불확실, 기타(-1.0) 기준.`
       : `깨움 AI가 현재 나이·연소득·직종을 기반으로 추정했습니다. 원하면 직접 수정할 수 있습니다. 이 값은 은퇴까지 고정 적용되는 상수가 아니라 최초 3년 AI 추정값입니다. 직종 코드 ${mapping.category}.`;
@@ -738,7 +754,7 @@ function renderReport(r){
     $('mCurrentSmall').textContent=`추가 ${f.additional_tenure_years}년 자동 계산`;
     $('mFutureLabel').textContent='예상 DB 퇴직급여';
     $('mFuture').textContent=fmtMoney(f.estimated_db_benefit ?? f.future_asset);
-    $('mFutureSmall').textContent=`최초 3년 ${Number(f.first_3y_wage_growth_rate_pct ?? f.wage_growth_rate_pct ?? 0).toFixed(2)}% · 이후 재귀 예측`;
+    $('mFutureSmall').textContent=`최초 3년 ${Number(f.first_3y_wage_growth_rate_pct ?? f.wage_growth_rate_pct ?? 0).toFixed(3)}% · 이후 재귀 예측`;
     $('mTargetLabel').textContent='목표 은퇴자산';
     $('mTarget').textContent=fmtMoney(f.target_retirement_asset);
     $('mTargetSmall').textContent='4% 인출률 계산값 · 실제 원화 숫자';
@@ -764,7 +780,7 @@ function renderReport(r){
     ['현재 근속연수',`${Number(pf.current_tenure_years||0).toFixed(1).replace('.0','')}년`],
     ['예상 추가 근속',`${pf.expected_additional_tenure_years}년 (자동)`],
     ['예상 총 근속',`${Number(pf.total_expected_tenure_years||0).toFixed(1).replace('.0','')}년`],
-    ['향후 3년 예상 연평균 임금상승률',`${Number(f.first_3y_wage_growth_rate_pct ?? pf.wage_growth?.rate_pct ?? 0).toFixed(2)}%`],
+    ['향후 3년 예상 연평균 임금상승률',`${Number(f.first_3y_wage_growth_rate_pct ?? pf.wage_growth?.rate_pct ?? 0).toFixed(3)}%`],
     ['AI 진단',pf.diagnosis_hint],
   ] : [
     ['은퇴까지',`${pf.years_to_retirement}년`],
@@ -813,14 +829,21 @@ function renderProjection(r){
   $('mProbability').textContent=fmtPct(mc.success_probability_pct,1);
   if(isDB){
     $('mFuture').textContent=fmtMoney(f.estimated_db_benefit ?? f.future_asset);
-    $('mFutureSmall').textContent=`최초 3년 ${Number(f.first_3y_wage_growth_rate_pct ?? f.wage_growth_rate_pct ?? 0).toFixed(2)}% · 이후 재귀 예측`;
+    $('mFutureSmall').textContent=`최초 3년 ${Number(f.first_3y_wage_growth_rate_pct ?? f.wage_growth_rate_pct ?? 0).toFixed(3)}% · 이후 재귀 예측`;
     $('allocationBars').innerHTML='<div class="db-allocation-note">DB형은 개인 자산배분 최적화 대신 예상 DB 급여와 희망 노후소득의 Gap을 분석합니다.</div>';
   }else{
     $('mFuture').textContent=fmtMoney(f.future_asset);
-    $('mFutureSmall').textContent=f.calculation_basis==='selected_product_pdf'?'선택 상품 PDF 기반 계산':'추출 실패 fallback 계산';
+    const productBasis=f.calculation_basis==='selected_product_pdf'?'선택 상품 PDF 기반 계산':'추출 실패 fallback 계산';
+    const salaryBasis=r.user.operation_type === 'DC'
+      ? (f.contribution_projection_basis === 'salary_path'
+        ? ' · 임금 재귀 예측·연령 커브 반영'
+        : ' · 임금 예측 미적용: 고정 납입액으로 계산') : '';
+    $('mFutureSmall').textContent=productBasis+salaryBasis;
     renderAllocation(o.recommended_allocation);
   }
   $('optimizedGoal').textContent=fmtPct(o.goal_rate_pct,1);
+  const continuation=f.salary_projection?.continuation;
+  if(continuation) $('mFutureSmall').textContent=continuation.note;
   // 비교 재계산일 때는 파란 선이 가입 상품이 아니라 방금 고른 상품 기준이다.
   // r.user는 원본 그대로라 상품명을 여기서 따로 받아야 범례·툴팁이 거짓말을 하지 않는다.
   drawChart(f.series,o.series,f.target_retirement_asset,{
@@ -828,6 +851,9 @@ function renderProjection(r){
     isCompare: !!r.projectionProductName,
     productName: r.projectionProductName || r.user.product_name,
     wageGrowthPct: f.wage_growth_rate_pct,
+    isDC: r.user.operation_type === 'DC',
+    salaryProjectionApplied: f.contribution_projection_basis === 'salary_path',
+    continuationNote: continuation?.note,
   });
 }
 /* ---- v21: 다른 상품으로 전망만 다시 계산해 비교 ---- */
@@ -962,15 +988,19 @@ function chartSeriesInfo(meta){
   // 없는 구분을 범례에 적으면 오히려 거짓말이 되므로 한 줄로만 설명한다.
   if(meta.isDB){
     return [{key:'current', color:CHART_COLORS.current, name:'예상 퇴직급여 (DB)', short:'예상 퇴직급여 (DB)',
-             desc:`임금상승률 ${Number(meta.wageGrowthPct||0).toFixed(2)}% 가정 · 근속연수 누적`}];
+             desc:meta.continuationNote || `임금상승률 ${Number(meta.wageGrowthPct||0).toFixed(3)}% 가정 · 근속연수 누적`}];
   }
   const basis = meta.isCompare ? '비교 상품 기준' : '가입 상품 기준';
+  const contributionNote = meta.continuationNote ? ` · ${meta.continuationNote}` : meta.isDC
+    ? (meta.salaryProjectionApplied
+      ? ' · 3년마다 임금 재예측·연령 커브로 회사 부담금 조정, 개인 추가 납입액 고정'
+      : ' · 임금 예측 미적용, 고정 납입액 사용') : '';
   return [
     {key:'current', color:CHART_COLORS.current, short:basis,
      name:`${basis} · ${meta.productName||'선택 상품'}`,
-     desc:`${meta.isCompare?'지금 고른 상품':'현재 가입 상품'}의 구성비중으로 계산한 전망`},
+     desc:`${meta.isCompare?'지금 고른 상품':'현재 가입 상품'}의 구성비중으로 계산한 전망${contributionNote}`},
     {key:'optimized', color:CHART_COLORS.optimized, name:'최적화 자산배분 기준', short:'최적화 자산배분 기준',
-     desc:'깨움이 추천한 자산배분을 따랐을 때의 전망'},
+     desc:`깨움이 추천한 자산배분을 따랐을 때의 전망${contributionNote}`},
   ];
 }
 
@@ -1027,13 +1057,16 @@ function showChartHover(year){
   if(!st || !g) return;
   const rows=st.series.map(s=>{
     const d=(s.key==='current'?st.current:st.optimized).find(v=>v.year===year);
-    return d ? {...s, value:Number(d.value), age:d.age} : null;
+    return d ? {...s, value:Number(d.value), age:d.age, annualContribution:d.annual_contribution} : null;
   }).filter(Boolean);
   if(!rows.length){ hideChartHover(); return; }
 
   const cx=st.x(year), FS=11, LH=16, PAD=10;
   const title = rows[0].age!=null ? `${year}년 후 · 만 ${rows[0].age}세` : `${year}년 후`;
   const lines = rows.map(r=>({color:r.color, text:`${r.short}  ${fmtMoney(r.value)}`}));
+  if(st.meta.isDC && rows[0].annualContribution != null){
+    lines.push({color:CHART_COLORS.current, text:`해당 연도 납입액  ${fmtMoney(rows[0].annualContribution)}`});
+  }
   // 목표선은 연도와 무관하게 일정하지만, 전망과 목표의 거리가 이 그래프의 핵심이라
   // 매 지점에서 두 값을 나란히 읽을 수 있도록 함께 적는다.
   lines.push({color:CHART_COLORS.target, dash:true, text:`목표 은퇴자산  ${fmtMoney(st.target)}`});
