@@ -770,7 +770,7 @@ function renderReport(r){
     $('mCurrentSmall').textContent=`추가 ${f.additional_tenure_years}년 자동 계산`;
     $('mFutureLabel').textContent='예상 DB 퇴직급여';
     $('mFuture').textContent=fmtMoney(f.estimated_db_benefit ?? f.future_asset);
-    $('mFutureSmall').textContent=`최초 3년 ${Number(f.first_3y_wage_growth_rate_pct ?? f.wage_growth_rate_pct ?? 0).toFixed(2)}% · 이후 재귀 예측`;
+    $('mFutureSmall').textContent=dbWageDesc(f);
     $('mTargetLabel').textContent='목표 은퇴자산';
     $('mTarget').textContent=fmtMoney(f.target_retirement_asset);
     $('mTargetSmall').textContent='4% 인출률 계산값 · 실제 원화 숫자';
@@ -850,7 +850,7 @@ function renderProjection(r){
   if(isDB){
     $('mFutureLabel').textContent='예상 DB 퇴직급여';
     $('mFuture').textContent=fmtMoney(f.estimated_db_benefit ?? f.future_asset);
-    $('mFutureSmall').textContent=`최초 3년 ${Number(f.first_3y_wage_growth_rate_pct ?? f.wage_growth_rate_pct ?? 0).toFixed(2)}% · 이후 재귀 예측`;
+    $('mFutureSmall').textContent=dbWageDesc(f);
     $('mProbabilitySmall').textContent='임금경로 몬테카를로';
     $('allocationBars').innerHTML='<div class="db-allocation-note">DB형은 개인 자산배분 최적화 대신 예상 DB 급여와 희망 노후소득의 Gap을 분석합니다.</div>';
   }else{
@@ -1075,6 +1075,14 @@ const CHART_COLORS = {current:'#215ee9', optimized:'#eb6834', target:'#6b6b6b'};
 const CHART_INK = {grid:'#e7e8e8', axis:'#8a8f98', surface:'#ffffff', tooltipBg:'#ffffff', tooltipLine:'#dadadb', tooltipInk:'#1f1f1f'};
 let chartState = null;
 
+// DB 임금경로는 더 이상 하나의 상수가 아니다. 최초 3년만 추정 상승률을 쓰고 그 뒤는
+// 재귀 예측이라, '임금상승률 x% 가정'이라고 적으면 은퇴까지 고정인 것처럼 읽힌다.
+// 지표 칸과 범례가 어긋나지 않도록 문구를 여기 한 곳에 둔다.
+function dbWageDesc(f){
+  const pct = Number(f.first_3y_wage_growth_rate_pct ?? f.wage_growth_rate_pct ?? 0).toFixed(2);
+  return `최초 3년 ${pct}% · 이후 재귀 예측`;
+}
+
 // name은 범례용 전체 이름, short는 툴팁용 짧은 이름이다. 툴팁은 커서를 따라다니며 그래프를
 // 가리므로 상품명까지 넣으면 상자가 화면 절반을 덮는다. 어느 상품인지는 범례에 이미 적혀 있다.
 //
@@ -1093,7 +1101,7 @@ function chartSeries(r){
   if(baselineIsDB && !base){
     return [{key:'current', color:CHART_COLORS.current, points:f.series,
              name:'예상 퇴직급여 (DB)', short:'예상 퇴직급여 (DB)',
-             desc:`임금상승률 ${Number(f.wage_growth_rate_pct||0).toFixed(2)}% 가정 · 근속연수 누적`}];
+             desc:`${dbWageDesc(f)} · 근속연수 누적`}];
   }
 
   // v35: DB 비교는 선이 셋이다. 기준선이 DB 급여 하나뿐이라 파선도 하나만 나온다.
@@ -1102,7 +1110,7 @@ function chartSeries(r){
     return [
       {key:'base-current', color:CHART_COLORS.current, dash:true, points:(base.finance||{}).series,
        name:'지금 · DB 예상 퇴직급여', short:'DB 급여',
-       desc:`임금상승률 ${Number((base.finance||{}).wage_growth_rate_pct||0).toFixed(2)}% 가정 · 근속연수 누적`},
+       desc:`${dbWageDesc(base.finance||{})} · 근속연수 누적`},
       {key:'current', color:CHART_COLORS.current, points:f.series, short:'고른 상품',
        name:`이 상품으로 운용 · ${r.projectionProductName||'비교 상품'}`,
        desc:'같은 조건으로 DC/IRP에서 이 상품에 운용했을 때의 전망'},
@@ -1330,7 +1338,7 @@ function renderWhatIf(w){
   const card=chatEl('div','whatif-card');
   card.appendChild(chatEl('h5',null,'재계산 시나리오'));
 
-  const labels={retirement_age:'은퇴 나이', annual_contribution:'연간 납입액', safe_ratio_pct:'안전자산 비중', wage_growth_rate_pct:'임금상승률'};
+  const labels={retirement_age:'은퇴 나이', annual_contribution:'연간 납입액', safe_ratio_pct:'안전자산 비중', wage_growth_rate_pct:'최초 3년 임금상승률'};
   const units={retirement_age:'세', safe_ratio_pct:'%', wage_growth_rate_pct:'%'};
   const changed=Object.entries(w.changes||{}).map(([k,v])=>`${labels[k]||k} ${v}${units[k]||''}`).join(' · ');
   const notes=(w.notes||[]).join(' ');
