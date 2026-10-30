@@ -12,7 +12,8 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.agents import HybridAgenticWorkflow
 from backend.chat_agent import ReportChatAgent
-from backend.models import ChatRequest, OperationType, ReprojectRequest, UserPensionInput
+from backend.models import ChatRequest, OperationType, ReprojectRequest, UserPensionInput, ReportLanguageRequest
+from backend.localization import localize_presentation, localize_chat
 from backend.qwen_client import QwenGateway
 from backend.rag import PensionRAG
 from backend.config import ROOT
@@ -148,6 +149,7 @@ def analyze(user: UserPensionInput):
     result = _mark_source_document(workflow.run(user))
     # 보고서 화면 챗봇이 같은 분석 context를 이어서 쓰도록 서버에 잠시 보관한다.
     result['analysis_id'] = analysis_store.put(user, result)
+    result['presentation'] = localize_presentation(result, user.language, qwen)
     # 다음 사용자의 '예상 남은 시간'은 이 실측값들만 근거로 계산된다.
     #
     # 여기서 재는 값과 result['timing']['total_seconds']는 일부러 다르다.
@@ -200,6 +202,7 @@ def analyze_stream(user: UserPensionInput):
                 )
                 # 챗봇/상품비교가 이어서 쓰도록 blocking 경로와 똑같이 세션에 보관한다.
                 result['analysis_id'] = analysis_store.put(user, result)
+                result['presentation'] = localize_presentation(result, user.language, qwen)
                 run_times.record(user.operation_type, time.perf_counter() - started, qwen.enabled)
                 events.put({'type': 'result', 'result': result})
             except SalaryGrowthRequiredError as exc:
@@ -322,4 +325,14 @@ def chat(request: ChatRequest):
     if session is None:
         raise HTTPException(status_code=404, detail='분석 결과가 만료되었습니다. 다시 분석해주세요.')
     history = [turn.model_dump() for turn in request.history]
-    return chat_agent.answer(session, request.message, history)
+    response = chat_agent.answer(session, request.message, history)
+    return localize_chat(response, session['result'], request.language, qwen)
+
+
+@app.post('/api/report-language')
+def report_language(request: ReportLanguageRequest):
+    """Translate saved presentation without recalculating financial results."""
+    session = analysis_store.get(request.analysis_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail='분석 결과가 만료되었습니다. 다시 분석해주세요.')
+    return localize_presentation(session['result'], request.language, qwen)

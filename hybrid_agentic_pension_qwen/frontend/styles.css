@@ -612,3 +612,18 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;background-im
 }
 .db-insights small{display:block;color:var(--muted);font-size:11px;line-height:1.6}
 @media print{.db-insights>div{border-color:#ddd;background:white}.db-insights strong{color:#1a4bc0}}
+
+/* Locale controls and longer English labels. */
+.language-control{display:flex;align-items:center;gap:10px;flex-wrap:wrap;max-width:100%}
+.language-control label{font-size:13px;color:var(--muted)}
+.language-control select{font:inherit;color:var(--text);background:var(--card,#fff);border:1px solid var(--line);border-radius:10px;padding:9px 12px;min-height:44px}
+.language-control select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+#localeStatus{font-size:12px;color:var(--muted);max-width:240px}
+html:lang(en) .money-input input{padding-right:98px!important}
+html:lang(en) .money-input em{font-size:11px;max-width:90px}
+html:lang(en) .unit-input.age-unit input{padding-right:62px!important}
+html:lang(en) .unit-input.age-unit em{font-size:11px}
+html:lang(en) .field>span,html:lang(en) .inline-field-label{line-height:1.5}
+html:lang(en) .metric-grid span,html:lang(en) .stage-body small{line-height:1.5}
+html:lang(zh-CN) body{font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif}
+@media(max-width:720px){.language-control{width:100%}.language-control select{flex:0 0 auto}.toolbar-actions{flex-wrap:wrap}.toolbar-actions button{white-space:normal}.compare-actions{flex-wrap:wrap}.form-section-title{gap:12px;flex-wrap:wrap}}

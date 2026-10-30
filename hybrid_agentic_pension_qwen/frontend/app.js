@@ -1,3 +1,4 @@
+const notifyUser = value => window.alert(I18n.text(value));
 const $ = (id) => document.getElementById(id);
 let catalog = {providers: [], products: []};
 let lastResult = null;
@@ -56,7 +57,7 @@ function fmtMoney(v){
   const n = Number(v ?? 0);
   if(!Number.isFinite(n)) return '-';
   const won = Math.round(n * 10000);
-  return won.toLocaleString('ko-KR');
+  return won.toLocaleString(I18n.locale);
 }
 function fmtPct(v, d=0){ return `${Number(v||0).toFixed(d)}%`; }
 function fmtDuration(sec){
@@ -117,7 +118,7 @@ async function postJson(path, body, timeoutMs = REQUEST_TIMEOUT_MS){
   try{
     return await fetch(path, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(body), signal:controller.signal,
+      body:JSON.stringify({...body, language:I18n.language}), signal:controller.signal,
     });
   }catch(err){
     throw new ServerUnreachableError(
@@ -136,6 +137,7 @@ async function init(){
     const c = await response.json();
     if(!Array.isArray(c.providers) || !Array.isArray(c.products)) throw new Error('catalog 응답 형식이 올바르지 않습니다.');
     catalog = c;
+    I18n.registerNames([...c.providers, ...c.products.map(product=>product.title)]);
     fillProviders();
   }catch(e){
     console.error('상품 catalog 로딩 실패:', e);
@@ -301,6 +303,7 @@ function payload(){
     annual_income:Number($('annualIncome').value),
     desired_monthly_income:Number($('desiredMonthlyIncome').value),
     operation_type:op,
+    language:I18n.language,
   };
 
   if(op === 'DB'){
@@ -667,9 +670,9 @@ async function runAnalysis(data){
 $('pensionForm').addEventListener('submit', async(e)=>{
   e.preventDefault();
   const data=payload();
-  if(data.retirement_age<=data.age){ alert('은퇴 나이는 현재 나이보다 커야 합니다.'); return; }
+  if(data.retirement_age<=data.age){ notifyUser('은퇴 나이는 현재 나이보다 커야 합니다.'); return; }
   if(!validWageGrowthRate()){
-    alert('임금상승률은 -5%에서 20% 사이로 입력해주세요.');
+    notifyUser('임금상승률은 -5%에서 20% 사이로 입력해주세요.');
     $('wageGrowthRate').focus();
     return;
   }
@@ -679,13 +682,13 @@ $('pensionForm').addEventListener('submit', async(e)=>{
   startPendingAnimation(data.operation_type, {simulate:false});
   try{
     const result=await runAnalysis(data);
-    lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(result); await finishTrace(result); renderReport(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
+    lastResult=result; analysisId=result.analysis_id||null; stopPendingAnimation(result); await finishTrace(result); renderReport(result); await updateReportLanguage(result); await delay(350); $('workflowView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo({top:0,behavior:'smooth'});
   }catch(err){
     stopPendingAnimation();
     console.error('분석 실패:', err);
     // 서버가 아예 응답하지 않은 경우까지 'Qwen 설정을 확인하라'고 안내하면 엉뚱한 곳을 보게 된다.
     // AnalyzeError는 서버가 알려준 실제 사유를 담고 있으므로 그대로 보여준다.
-    alert((err instanceof ServerUnreachableError || err instanceof AnalyzeError)
+    notifyUser((err instanceof ServerUnreachableError || err instanceof AnalyzeError)
       ? err.message
       : '분석 중 오류가 발생했습니다. .env의 Qwen 설정 또는 서버 로그를 확인해주세요.');
     $('inputView').classList.remove('hidden'); $('workflowView').classList.add('hidden');
@@ -777,7 +780,7 @@ function cleanReportProse(payload){
 }
 
 function renderReport(r){
-  const u=r.user, f=r.finance, mc=r.monte_carlo, o=r.optimizer, rep=cleanReportProse(r.report), rec=cleanReportProse(r.recommendation);
+  const u=r.user, f=r.finance, mc=r.monte_carlo, o=r.optimizer, rep=cleanReportProse(r.presentation?.language === I18n.language ? r.presentation.report : r.report), rec=cleanReportProse(r.recommendation);
   const isDB = u.operation_type === 'DB';
   $('reportTitleTop').textContent=rep.title||'AI 퇴직연금 건강검진 보고서';
   $('reportTitle').textContent=rep.title||'AI 퇴직연금 건강검진 보고서';
@@ -818,14 +821,14 @@ function renderReport(r){
     ['예상 추가 근속',`${pf.expected_additional_tenure_years}년 (자동)`],
     ['예상 총 근속',`${Number(pf.total_expected_tenure_years||0).toFixed(1).replace('.0','')}년`],
     ['향후 3년 예상 연평균 임금상승률',`${Number(f.first_3y_wage_growth_rate_pct ?? pf.wage_growth?.rate_pct ?? 0).toFixed(2)}%`],
-    ['AI 진단',pf.diagnosis_hint],
+    ['AI 진단',(r.presentation?.language === I18n.language ? r.presentation.diagnosis_hint : pf.diagnosis_hint)],
   ] : [
     ['은퇴까지',`${pf.years_to_retirement}년`],
     ['객관적 위험수용능력',pf.risk_capacity],
     ['투자유형',pf.investment_type],
     ['연간 납입률',fmtPct(pf.saving_rate_pct,1)],
     ['희망 소득대체 수준',fmtPct(pf.desired_income_replacement_pct,1)],
-    ['AI 진단',pf.diagnosis_hint],
+    ['AI 진단',(r.presentation?.language === I18n.language ? r.presentation.diagnosis_hint : pf.diagnosis_hint)],
   ];
   $('profileFacts').innerHTML=profileFacts.map(([a,b])=>`<div><b>${esc(a)}</b>${esc(b)}</div>`).join('');
 
@@ -1261,7 +1264,7 @@ function drawChart(series, target){
 // 숫자·라틴은 그 절반쯤이라, 이 정도면 배경 상자가 글자를 자르지 않는다.
 function svgTextWidth(text, size){
   let w=0;
-  for(const ch of text) w += /[가-힣㄰-㆏　-〿＀-￯]/.test(ch) ? size : size*0.56;
+  for(const ch of text) w += /[가-힣㄰-㆏　-〿＀-￯\u3400-\u9fff]/.test(ch) ? size : size*0.56;
   return w;
 }
 function chartPointFromEvent(ev){
@@ -1287,11 +1290,11 @@ function showChartHover(year){
   if(!rows.length){ hideChartHover(); return; }
 
   const cx=st.x(year), FS=11, LH=16, PAD=10;
-  const title = rows[0].age!=null ? `${year}년 후 · 만 ${rows[0].age}세` : `${year}년 후`;
-  const lines = rows.map(r=>({color:r.color, dash:r.dash, text:`${r.short}  ${fmtMoney(r.value)}`}));
+  const title = I18n.text(rows[0].age!=null ? `${year}년 후 · 만 ${rows[0].age}세` : `${year}년 후`);
+  const lines = rows.map(r=>({color:r.color, dash:r.dash, text:`${I18n.text(r.short)}  ${fmtMoney(r.value)}`}));
   // 목표선은 연도와 무관하게 일정하지만, 전망과 목표의 거리가 이 그래프의 핵심이라
   // 매 지점에서 두 값을 나란히 읽을 수 있도록 함께 적는다.
-  lines.push({color:CHART_COLORS.target, dash:true, text:`목표 은퇴자산  ${fmtMoney(st.target)}`});
+  lines.push({color:CHART_COLORS.target, dash:true, text:`${I18n.text('목표 은퇴자산')}  ${fmtMoney(st.target)}`});
   const bw = Math.max(svgTextWidth(title, FS), ...lines.map(l=>svgTextWidth(l.text, FS)+14)) + PAD*2;
   const bh = PAD*2 + FS + 4 + lines.length*LH;
 
@@ -1362,7 +1365,7 @@ function setupChat(r){
   (isDB?SUGGESTIONS.DB:SUGGESTIONS.DCIRP).forEach(q=>{
     const b=chatEl('button','chat-suggestion',q);
     b.type='button';
-    b.addEventListener('click',()=>{ $('chatInput').value=q; sendChat(); });
+    b.addEventListener('click',()=>{ $('chatInput').value=I18n.text(q); sendChat(); });
     list.appendChild(b);
   });
   $('chatDock').classList.remove('hidden');
@@ -1486,3 +1489,56 @@ async function sendChat(){
   }
 }
 $('chatForm').addEventListener('submit',(e)=>{ e.preventDefault(); sendChat(); });
+
+
+/* Change report prose without rerunning calculations, clearing comparisons or chat history. */
+const reportLanguages = new Map();
+let reportLanguageRevision = 0;
+async function updateReportLanguage(result) {
+  const revision = ++reportLanguageRevision;
+  const language = I18n.language;
+  const id = result.analysis_id;
+  if(!id) return;
+  const key = id + ':' + language;
+  let presentation = language === 'ko'
+    ? {language,report:result.report,diagnosis_hint:result.profile.diagnosis_hint}
+    : result.presentation?.language === language ? result.presentation : reportLanguages.get(key);
+  const status = $('localeStatus');
+  const print = $('printBtn');
+  if(!presentation) {
+    status.textContent='보고서 번역 중...';
+    print.disabled=true;
+    try {
+      const res = await postJson('/api/report-language', {analysis_id:id, language});
+      if(!res.ok) throw new Error('Report language request failed');
+      presentation=await res.json();
+      reportLanguages.set(key,presentation);
+    } catch(error) {
+      if(revision === reportLanguageRevision) {
+        status.textContent='보고서 번역에 실패했습니다. 다시 시도해주세요.';
+        print.disabled=true;
+      }
+      return;
+    }
+  }
+  if(revision !== reportLanguageRevision || lastResult !== result || language !== I18n.language) return;
+  const rep = cleanReportProse(presentation.report);
+  $('reportTitleTop').textContent=rep.title;
+  $('reportTitle').textContent=rep.title;
+  $('executiveSummary').textContent=rep.executive_summary || '';
+  $('productAnalysis').textContent=rep.product_analysis || '';
+  $('simulationComment').textContent=rep.simulation_comment || '';
+  $('strategyList').innerHTML=(rep.strategy||[]).map(item=>'<div>'+esc(item)+'</div>').join('');
+  $('riskNotes').innerHTML=(rep.risk_notes||[]).map(item=>'<div>'+esc(item)+'</div>').join('');
+  const diagnosis=$('profileFacts').lastElementChild;
+  if(diagnosis) diagnosis.innerHTML='<b>'+esc(I18n.text('AI 진단'))+'</b>'+esc(presentation.diagnosis_hint||'');
+  status.textContent='';
+  print.disabled=false;
+  I18n.refresh();
+}
+window.addEventListener('localechange', () => {
+  if(lastResult && !$('reportView').classList.contains('hidden')) {
+    updateReportLanguage(lastResult);
+    renderCompareView();
+  }
+});

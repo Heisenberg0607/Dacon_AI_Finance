@@ -6,9 +6,11 @@ from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 InvestmentType = Literal['안정형', '안정투자형', '중립투자형', '적극투자형']
 OperationType = Literal['DB', 'DC', 'IRP']
+Language = Literal['ko', 'en', 'zh']
 
 
 class UserPensionInput(BaseModel):
+    language: Language = 'ko'
     # Request-local only: never serialized into prompts, responses or stored profiles.
     _salary_projection_cache: dict = PrivateAttr(default_factory=dict)
     # 공통 입력
@@ -106,6 +108,11 @@ class ReprojectRequest(BaseModel):
     product_name: str = Field(min_length=1, max_length=300)
 
 
+class ReportLanguageRequest(BaseModel):
+    analysis_id: str = Field(min_length=8, max_length=64)
+    language: Language = 'ko'
+
+
 class ChatRequest(BaseModel):
     """보고서 화면 챗봇 요청.
 
@@ -114,6 +121,7 @@ class ChatRequest(BaseModel):
 
     analysis_id: str = Field(min_length=8, max_length=64)
     message: str = Field(min_length=1, max_length=800)
+    language: Language = 'ko'
     history: list[ChatTurn] = Field(default_factory=list)
 
     @model_validator(mode='after')
