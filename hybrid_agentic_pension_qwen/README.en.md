@@ -1,5 +1,7 @@
 # 깨움(KKAEUM) | AI-Powered Personal Retirement Pension Analysis and Decision Support
 
+This project was submitted to the AI Finance Hackathon hosted by DACON in South Korea.
+
 > A web service that connects evidence from official product documents, personalized salary growth forecasts, and financial simulations to explain pension holdings and retirement asset shortfalls.
 
 **2026 Financial AI Challenge · Team Gijigae (3 members)**  
